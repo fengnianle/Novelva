@@ -16,22 +16,29 @@ const App: React.FC = () => {
   }, [loadSettings]);
 
   return (
-    <div className="flex h-screen bg-background text-foreground">
-      <Sidebar />
-      <main className="flex-1 overflow-hidden">
-        <div className="h-full" style={{ display: viewMode === 'reader' ? 'block' : 'none' }}>
-          <ReaderView />
-        </div>
-        <div className="h-full" style={{ display: viewMode === 'vocabulary' ? 'block' : 'none' }}>
-          <VocabularyList />
-        </div>
-        <div className="h-full" style={{ display: viewMode === 'review' ? 'block' : 'none' }}>
-          <FlashCard />
-        </div>
-        <div className="h-full" style={{ display: viewMode === 'settings' ? 'block' : 'none' }}>
-          <SettingsPanel />
-        </div>
-      </main>
+    <div className="flex flex-col h-screen bg-background text-foreground">
+      {/* Top drag bar — spans entire window width for easy dragging */}
+      <div
+        className="h-9 shrink-0 w-full"
+        style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+      />
+      <div className="flex flex-1 min-h-0">
+        <Sidebar />
+        <main className="flex-1 overflow-hidden">
+          <div className="h-full" style={{ display: viewMode === 'reader' ? 'block' : 'none' }}>
+            <ReaderView />
+          </div>
+          <div className="h-full" style={{ display: viewMode === 'vocabulary' ? 'block' : 'none' }}>
+            <VocabularyList />
+          </div>
+          <div className="h-full" style={{ display: viewMode === 'review' ? 'block' : 'none' }}>
+            <FlashCard />
+          </div>
+          <div className="h-full" style={{ display: viewMode === 'settings' ? 'block' : 'none' }}>
+            <SettingsPanel />
+          </div>
+        </main>
+      </div>
     </div>
   );
 };

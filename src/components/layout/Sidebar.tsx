@@ -21,10 +21,7 @@ export const Sidebar: React.FC = () => {
 
   return (
     <aside className="w-[68px] bg-secondary/30 border-r border-border flex flex-col items-center">
-      <div
-        className="w-full flex flex-col items-center pt-3 pb-2"
-        style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
-      >
+      <div className="w-full flex flex-col items-center pt-3 pb-2">
         <div className="w-9 h-9 rounded-xl bg-primary/90 flex items-center justify-center shadow-sm">
           <span className="text-primary-foreground font-bold text-sm">Nv</span>
         </div>

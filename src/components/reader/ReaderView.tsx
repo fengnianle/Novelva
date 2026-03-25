@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useCallback } from 'react';
 import { useReaderStore } from '../../stores/reader-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useFileImport } from '../../hooks/use-file-import';
-import { Paragraph } from './Paragraph';
+import { Paragraph, resetSharedObserver } from './Paragraph';
 import { FolderOpen, BookOpen, Loader2 } from 'lucide-react';
 
 function getScrollPercent(el: HTMLDivElement): number {
@@ -51,10 +51,11 @@ export const ReaderView: React.FC = () => {
     loadRecentBooks();
   }, [loadRecentBooks]);
 
-  // Restore scroll position when book opens
+  // Reset observer & restore scroll position when book changes
   useEffect(() => {
     if (!currentBook || !scrollRef.current) return;
     hasRestoredScroll.current = false;
+    resetSharedObserver(); // Free stale observer entries from previous book
 
     const restore = async () => {
       const pct = await getScrollPosition(currentBook.filePath);
@@ -85,6 +86,29 @@ export const ReaderView: React.FC = () => {
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [currentBook]);
+
+  // Cancel pending timers when app goes to background to prevent freeze
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.hidden) {
+        // App went to background — cancel any pending work
+        if (scrollTimerRef.current) {
+          clearTimeout(scrollTimerRef.current);
+          scrollTimerRef.current = null;
+        }
+        if (rafRef.current) {
+          cancelAnimationFrame(rafRef.current);
+          rafRef.current = 0;
+        }
+        // Save current progress immediately before going to background
+        if (currentBook && currentProgressRef.current > 0) {
+          saveScrollPosition(currentBook.filePath, currentProgressRef.current);
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [currentBook, saveScrollPosition]);
 
   // RAF-throttled scroll handler — updates DOM directly, no React state changes
   const handleScroll = useCallback(() => {

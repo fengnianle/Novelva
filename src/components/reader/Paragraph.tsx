@@ -6,6 +6,15 @@ import { Sentence } from './Sentence';
 let sharedObserver: IntersectionObserver | null = null;
 const callbacks = new Map<Element, (visible: boolean) => void>();
 
+// Call this when book changes to free the old observer and all stale callbacks
+export function resetSharedObserver(): void {
+  if (sharedObserver) {
+    sharedObserver.disconnect();
+    sharedObserver = null;
+  }
+  callbacks.clear();
+}
+
 function getSharedObserver(): IntersectionObserver {
   if (!sharedObserver) {
     sharedObserver = new IntersectionObserver(

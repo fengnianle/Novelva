@@ -79,6 +79,11 @@ export function splitIntoWords(sentence: string): string[] {
     .filter((w) => w.length > 0);
 }
 
+// Check if a line ends with sentence-terminating punctuation (possibly followed by closing quotes)
+function endsWithSentenceEnd(text: string): boolean {
+  return /[.!?]["'\u201D\u2019)\]]*\s*$/.test(text);
+}
+
 export function splitIntoParagraphs(content: string): string[] {
   const normalized = content
     .replace(/\r\n/g, '\n')
@@ -107,15 +112,22 @@ export function splitIntoParagraphs(content: string): string[] {
       continue;
     }
 
-    // Detect paragraph start: line starts with indent/spaces or uppercase after a short previous line
-    const prevLine = i > 0 ? lines[i - 1]?.trim() : '';
-    const startsWithIndent = /^\s{2,}/.test(line);
-    const prevLineShort = prevLine.length > 0 && prevLine.length < 50;
-    const startsWithCapital = /^[A-Z"\u201C]/.test(trimmed);
+    if (current.length > 0) {
+      // Decide whether this line starts a new paragraph or continues the current one.
+      // A new paragraph starts ONLY when ALL of these are true:
+      //   1. The previous accumulated text ends with sentence-ending punctuation
+      //   2. This line starts with uppercase, quote, or indent
+      // Otherwise, it's a continuation (e.g. PDF page break mid-sentence).
+      const prevText = current[current.length - 1];
+      const prevEndsComplete = endsWithSentenceEnd(prevText);
+      const startsWithIndent = /^\s{2,}/.test(line);
+      const startsWithCapital = /^[A-Z"\u201C\u201D]/.test(trimmed);
 
-    // If current buffer has content and this looks like a new paragraph start
-    if (current.length > 0 && (startsWithIndent || (prevLineShort && startsWithCapital && !prevLine.endsWith(',')))) {
-      flushCurrent();
+      const isNewParagraph = prevEndsComplete && (startsWithIndent || startsWithCapital);
+
+      if (isNewParagraph) {
+        flushCurrent();
+      }
     }
 
     current.push(trimmed);

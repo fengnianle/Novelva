@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useVocabulary, VocabularyRow } from '../../hooks/use-vocabulary';
 import { useSettingsStore } from '../../stores/settings-store';
+import { useReaderStore } from '../../stores/reader-store';
 import { GraduationCap, ThumbsUp, ThumbsDown, RotateCw, CheckCircle2 } from 'lucide-react';
 
 interface ReviewWord extends VocabularyRow {
@@ -20,9 +21,15 @@ export const FlashCard: React.FC = () => {
   const [sessionComplete, setSessionComplete] = useState(false);
   const initialized = useRef(false);
 
+  const viewMode = useReaderStore((s) => s.viewMode);
+
+  // Reload vocabulary every time the review tab becomes visible
   useEffect(() => {
-    loadVocabulary();
-  }, [loadVocabulary]);
+    if (viewMode === 'review') {
+      initialized.current = false;
+      loadVocabulary();
+    }
+  }, [viewMode, loadVocabulary]);
 
   // Build review queue using spaced repetition schedule
   const buildQueue = useCallback(async () => {

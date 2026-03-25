@@ -1,15 +1,24 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { useVocabulary, VocabularyEntry, VocabMeaning } from '../../hooks/use-vocabulary';
-import { Trash2, BookOpen, Search, ChevronDown, ChevronRight, X } from 'lucide-react';
+import { useReaderStore } from '../../stores/reader-store';
+import { Trash2, BookOpen, Search, ChevronDown, ChevronRight, X, ArrowLeft, ExternalLink } from 'lucide-react';
 
 export const VocabularyList: React.FC = () => {
   const { entries, loading, loadVocabulary, removeWord, removeFromVocabulary } = useVocabulary();
   const [search, setSearch] = useState('');
   const [expandedWord, setExpandedWord] = useState<string | null>(null);
+  const [detailWord, setDetailWord] = useState<VocabularyEntry | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const savedScrollTop = useRef(0);
 
+  const viewMode = useReaderStore((s) => s.viewMode);
+
+  // Reload every time the vocabulary tab becomes visible
   useEffect(() => {
-    loadVocabulary();
-  }, [loadVocabulary]);
+    if (viewMode === 'vocabulary') {
+      loadVocabulary();
+    }
+  }, [viewMode, loadVocabulary]);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return entries;
@@ -30,9 +39,115 @@ export const VocabularyList: React.FC = () => {
     [entries]
   );
 
+  const openDetail = useCallback((entry: VocabularyEntry) => {
+    if (scrollRef.current) savedScrollTop.current = scrollRef.current.scrollTop;
+    setDetailWord(entry);
+  }, []);
+
+  const closeDetail = useCallback(() => {
+    setDetailWord(null);
+    // Restore scroll position after React re-renders the list
+    requestAnimationFrame(() => {
+      if (scrollRef.current) scrollRef.current.scrollTop = savedScrollTop.current;
+    });
+  }, []);
+
+  // Sync detailWord with updated entries (in case data changed while viewing detail)
+  useEffect(() => {
+    if (detailWord) {
+      const updated = entries.find((e) => e.word === detailWord.word);
+      if (updated) {
+        setDetailWord(updated);
+      } else {
+        setDetailWord(null); // word was deleted
+      }
+    }
+  }, [entries]);
+
+  // ── Detail View ──
+  if (detailWord) {
+    return (
+      <div className="h-full flex flex-col">
+        <div className="px-6 pt-10 pb-4 border-b border-border flex items-center gap-3">
+          <button
+            onClick={closeDetail}
+            className="w-8 h-8 rounded-lg hover:bg-accent flex items-center justify-center transition-colors shrink-0"
+          >
+            <ArrowLeft size={18} />
+          </button>
+          <div className="min-w-0">
+            <h1 className="text-xl font-bold">{detailWord.word}</h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {detailWord.meanings.length} 个义项 · {detailWord.ids.length} 条例句
+            </p>
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto px-6 py-6">
+          <div className="max-w-2xl space-y-6">
+            {detailWord.meanings.map((meaning, mIdx) => (
+              <div key={mIdx} className="bg-card border border-border rounded-xl p-5">
+                <div className="text-base font-semibold">
+                  {detailWord.meanings.length > 1 && (
+                    <span className="text-xs text-primary font-bold mr-2 bg-primary/10 px-2 py-0.5 rounded-full">
+                      义项 {mIdx + 1}
+                    </span>
+                  )}
+                  {meaning.meaning}
+                </div>
+                <div className="mt-4 space-y-3">
+                  {meaning.sentences.map((s) => (
+                    <div key={s.id} className="group/sentence bg-secondary/30 rounded-lg p-4 relative">
+                      <div className="text-sm leading-relaxed italic">
+                        "{s.sentence}"
+                      </div>
+                      {s.sentence_translation && (
+                        <div className="text-sm text-muted-foreground mt-2">
+                          {s.sentence_translation}
+                        </div>
+                      )}
+                      <div className="flex items-center justify-between mt-3">
+                        {s.source_file ? (
+                          <span className="text-xs text-muted-foreground/60">— {s.source_file}</span>
+                        ) : <span />}
+                        <button
+                          onClick={() => removeFromVocabulary(s.id)}
+                          className="text-xs text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover/sentence:opacity-100 flex items-center gap-1"
+                        >
+                          <Trash2 size={12} />
+                          删除例句
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+
+            <div className="flex items-center justify-between pt-2 pb-4">
+              <span className="text-xs text-muted-foreground">
+                添加于 {new Date(detailWord.latestDate).toLocaleDateString()}
+              </span>
+              <button
+                onClick={() => {
+                  removeWord(detailWord.word);
+                  setDetailWord(null);
+                }}
+                className="text-xs text-destructive hover:text-destructive/80 transition-colors flex items-center gap-1 px-3 py-1.5 rounded-lg hover:bg-destructive/10"
+              >
+                <Trash2 size={12} />
+                删除该词汇
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── List View ──
   return (
     <div className="h-full flex flex-col">
-      <div className="px-6 py-4 border-b border-border">
+      <div className="px-6 pt-10 pb-4 border-b border-border">
         <h1 className="text-lg font-semibold">词汇本</h1>
         <p className="text-sm text-muted-foreground mt-1">
           共 {entries.length} 个词汇，{totalSentences} 条例句
@@ -59,7 +174,7 @@ export const VocabularyList: React.FC = () => {
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto px-6 py-4">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-4">
         {loading && (
           <div className="text-center text-muted-foreground py-8">加载中...</div>
         )}
@@ -90,6 +205,7 @@ export const VocabularyList: React.FC = () => {
                 }
                 onRemoveWord={() => removeWord(entry.word)}
                 onRemoveSentence={(id) => removeFromVocabulary(id)}
+                onOpenDetail={() => openDetail(entry)}
               />
             ))}
           </div>
@@ -105,6 +221,7 @@ interface VocabularyCardProps {
   onToggle: () => void;
   onRemoveWord: () => void;
   onRemoveSentence: (id: number) => void;
+  onOpenDetail: () => void;
 }
 
 const VocabularyCard: React.FC<VocabularyCardProps> = ({
@@ -113,40 +230,53 @@ const VocabularyCard: React.FC<VocabularyCardProps> = ({
   onToggle,
   onRemoveWord,
   onRemoveSentence,
+  onOpenDetail,
 }) => {
   const mainMeaning = entry.meanings[0]?.meaning || '';
 
   return (
-    <div className="bg-card border border-border rounded-lg hover:shadow-sm transition-shadow">
+    <div className="bg-card border border-border rounded-lg hover:shadow-sm transition-shadow group">
       <div
         className="flex items-center justify-between px-4 py-3 cursor-pointer select-none"
         onClick={onToggle}
       >
         <div className="flex items-center gap-2 min-w-0 flex-1">
-          <span className="text-muted-foreground">
+          <span className="text-muted-foreground shrink-0">
             {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           </span>
           <span className="font-semibold text-base">{entry.word}</span>
           <span className="text-sm text-muted-foreground truncate">{mainMeaning}</span>
           {entry.meanings.length > 1 && (
-            <span className="text-xs text-muted-foreground bg-secondary px-1.5 py-0.5 rounded">
+            <span className="text-xs text-muted-foreground bg-secondary px-1.5 py-0.5 rounded shrink-0">
               {entry.meanings.length} 个义项
             </span>
           )}
-          <span className="text-xs text-muted-foreground">
+          <span className="text-xs text-muted-foreground shrink-0">
             {entry.ids.length} 句
           </span>
         </div>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onRemoveWord();
-          }}
-          className="text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100 ml-2 shrink-0"
-          title="删除该词汇"
-        >
-          <Trash2 size={14} />
-        </button>
+        <div className="flex items-center gap-1 shrink-0 ml-2">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenDetail();
+            }}
+            className="text-muted-foreground hover:text-primary transition-colors opacity-0 group-hover:opacity-100 p-1 rounded"
+            title="查看详情"
+          >
+            <ExternalLink size={13} />
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onRemoveWord();
+            }}
+            className="text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100 p-1 rounded"
+            title="删除该词汇"
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
       </div>
 
       {isExpanded && (
@@ -160,8 +290,20 @@ const VocabularyCard: React.FC<VocabularyCardProps> = ({
               onRemoveSentence={onRemoveSentence}
             />
           ))}
-          <div className="text-xs text-muted-foreground pt-1">
-            添加于 {new Date(entry.latestDate).toLocaleDateString()}
+          <div className="flex items-center justify-between pt-1">
+            <span className="text-xs text-muted-foreground">
+              添加于 {new Date(entry.latestDate).toLocaleDateString()}
+            </span>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenDetail();
+              }}
+              className="text-xs text-primary hover:text-primary/80 transition-colors flex items-center gap-1"
+            >
+              查看完整详情
+              <ExternalLink size={11} />
+            </button>
           </div>
         </div>
       )}
