@@ -51,7 +51,7 @@ export const SettingsPanel: React.FC = () => {
       </div>
 
       <div className="flex-1 overflow-y-auto px-6 py-6">
-        <div className="max-w-xl space-y-5">
+        <div className="space-y-5">
 
           {/* Appearance */}
           <SettingsCard>

@@ -81,6 +81,13 @@ const SelectedSentence: React.FC<SentenceProps> = ({ sentence, paragraphSentence
 
   const handleClose = useCallback(() => setSelectedSentenceId(null), [setSelectedSentenceId]);
 
+  const prev = sentenceIndexInParagraph > 0
+    ? paragraphSentences[sentenceIndexInParagraph - 1].text
+    : undefined;
+  const next = sentenceIndexInParagraph < paragraphSentences.length - 1
+    ? paragraphSentences[sentenceIndexInParagraph + 1].text
+    : undefined;
+
   return (
     <span className="relative inline">
       <span
@@ -105,6 +112,8 @@ const SelectedSentence: React.FC<SentenceProps> = ({ sentence, paragraphSentence
       <SentencePopover
         anchorRef={sentenceRef}
         sentence={sentence}
+        prevSentence={prev}
+        nextSentence={next}
         onClose={handleClose}
       />
       <span> </span>

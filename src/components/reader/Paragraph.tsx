@@ -58,7 +58,7 @@ export const Paragraph: React.FC<ParagraphProps> = React.memo(({ paragraph }) =>
   }, [activated]);
 
   return (
-    <p ref={ref} className="mb-4 leading-relaxed">
+    <p ref={ref} className="mb-4">
       {activated ? (
         paragraph.sentences.map((sentence, idx) => (
           <Sentence

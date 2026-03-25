@@ -19,9 +19,13 @@ const App: React.FC = () => {
     <div className="flex flex-col h-screen bg-background text-foreground">
       {/* Top drag bar — spans entire window width for easy dragging */}
       <div
-        className="h-9 shrink-0 w-full"
+        className="h-9 shrink-0 w-full flex items-center px-4"
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
-      />
+      >
+        <span className="text-xs text-muted-foreground/60 select-none">
+          Novelva <span className="text-[10px]">v1.0.0</span>
+        </span>
+      </div>
       <div className="flex flex-1 min-h-0">
         <Sidebar />
         <main className="flex-1 overflow-hidden">

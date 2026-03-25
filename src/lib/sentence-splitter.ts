@@ -106,27 +106,31 @@ export function splitIntoParagraphs(content: string): string[] {
     const line = lines[i];
     const trimmed = line.trim();
 
-    // Empty line = paragraph break
+    // Empty line — only treat as paragraph break if current text ends with
+    // sentence-ending punctuation. Otherwise it's likely a PDF page break
+    // mid-sentence, so just skip the blank line and continue accumulating.
     if (!trimmed) {
-      flushCurrent();
+      if (current.length > 0 && endsWithSentenceEnd(current[current.length - 1])) {
+        flushCurrent();
+      }
       continue;
     }
 
     if (current.length > 0) {
       // Decide whether this line starts a new paragraph or continues the current one.
-      // A new paragraph starts ONLY when ALL of these are true:
-      //   1. The previous accumulated text ends with sentence-ending punctuation
-      //   2. This line starts with uppercase, quote, or indent
-      // Otherwise, it's a continuation (e.g. PDF page break mid-sentence).
+      // A new paragraph starts ONLY when the previous accumulated text ends with
+      // sentence-ending punctuation. Otherwise, it's a continuation
+      // (e.g. PDF page break or line wrap mid-sentence).
       const prevText = current[current.length - 1];
       const prevEndsComplete = endsWithSentenceEnd(prevText);
-      const startsWithIndent = /^\s{2,}/.test(line);
-      const startsWithCapital = /^[A-Z"\u201C\u201D]/.test(trimmed);
 
-      const isNewParagraph = prevEndsComplete && (startsWithIndent || startsWithCapital);
-
-      if (isNewParagraph) {
-        flushCurrent();
+      if (prevEndsComplete) {
+        // Additional heuristic: if the line starts with lowercase, it's likely
+        // a continuation even after punctuation (e.g. "Dr. Smith went...")
+        const startsLower = /^[a-z]/.test(trimmed);
+        if (!startsLower) {
+          flushCurrent();
+        }
       }
     }
 

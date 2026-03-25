@@ -1,19 +1,24 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useAiStore } from '../../stores/ai-store';
 import { useVocabulary } from '../../hooks/use-vocabulary';
 import { useReaderStore } from '../../stores/reader-store';
 import { SentenceData } from '../../lib/sentence-splitter';
-import { X, Loader2, BookPlus, Check } from 'lucide-react';
+import { analyzeSentence } from '../../hooks/use-ai-analysis';
+import { X, Loader2, BookPlus, Check, RotateCw } from 'lucide-react';
 
 interface SentencePopoverProps {
   anchorRef: React.RefObject<HTMLSpanElement | null>;
   sentence: SentenceData;
+  prevSentence?: string;
+  nextSentence?: string;
   onClose: () => void;
 }
 
 export const SentencePopover: React.FC<SentencePopoverProps> = ({
   anchorRef,
   sentence,
+  prevSentence,
+  nextSentence,
   onClose,
 }) => {
   const { loading, currentAnalysis, error } = useAiStore();
@@ -22,6 +27,10 @@ export const SentencePopover: React.FC<SentencePopoverProps> = ({
   const popoverRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ top: 0, left: 0 });
   const [addedWords, setAddedWords] = useState<Set<string>>(new Set());
+
+  const handleRegenerate = useCallback(() => {
+    analyzeSentence(sentence.id, sentence.text, prevSentence, nextSentence, true);
+  }, [sentence, prevSentence, nextSentence]);
 
   // Check which words are already in vocabulary for this sentence
   useEffect(() => {
@@ -107,12 +116,22 @@ export const SentencePopover: React.FC<SentencePopoverProps> = ({
     >
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-border">
         <span className="text-xs font-medium text-muted-foreground">AI 解析</span>
-        <button
-          onClick={onClose}
-          className="text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <X size={14} />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={handleRegenerate}
+            disabled={loading}
+            className="text-muted-foreground hover:text-primary transition-colors disabled:opacity-40 p-0.5 rounded"
+            title="重新生成"
+          >
+            <RotateCw size={13} className={loading ? 'animate-spin' : ''} />
+          </button>
+          <button
+            onClick={onClose}
+            className="text-muted-foreground hover:text-foreground transition-colors p-0.5 rounded"
+          >
+            <X size={14} />
+          </button>
+        </div>
       </div>
 
       <div className="px-4 py-3 max-h-[400px] overflow-y-auto">

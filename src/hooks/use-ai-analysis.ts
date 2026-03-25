@@ -20,7 +20,8 @@ export async function analyzeSentence(
   sentenceHash: string,
   currentSentence: string,
   prevSentence?: string,
-  nextSentence?: string
+  nextSentence?: string,
+  skipCache = false
 ): Promise<void> {
   const { setLoading, setCurrentAnalysis, setError, addToWordCache } = useAiStore.getState();
   const { apiKey, systemPrompt, sentencePrompt } = useSettingsStore.getState();
@@ -33,30 +34,32 @@ export async function analyzeSentence(
   const api = (window as any).electronAPI;
   if (!api) return;
 
-  // Check cache first
-  try {
-    const cached = await api.dbQuery(
-      'SELECT * FROM sentence_cache WHERE sentence_hash = ?',
-      [sentenceHash]
-    );
-    if (cached && cached.length > 0) {
-      const row = cached[0];
-      const analysis: SentenceAnalysis = {
-        translation: row.translation,
-        key_expressions: JSON.parse(row.key_expressions),
-        explanation: row.explanation,
-        words: JSON.parse(row.word_analyses),
-      };
-      setCurrentAnalysis(analysis);
+  // Check cache first (skip if regenerating)
+  if (!skipCache) {
+    try {
+      const cached = await api.dbQuery(
+        'SELECT * FROM sentence_cache WHERE sentence_hash = ?',
+        [sentenceHash]
+      );
+      if (cached && cached.length > 0) {
+        const row = cached[0];
+        const analysis: SentenceAnalysis = {
+          translation: row.translation,
+          key_expressions: JSON.parse(row.key_expressions),
+          explanation: row.explanation,
+          words: JSON.parse(row.word_analyses),
+        };
+        setCurrentAnalysis(analysis);
 
-      // Load words into cache
-      for (const w of analysis.words) {
-        addToWordCache(w.word, w);
+        // Load words into cache
+        for (const w of analysis.words) {
+          addToWordCache(w.word, w);
+        }
+        return;
       }
-      return;
+    } catch (e) {
+      console.error('Cache lookup failed:', e);
     }
-  } catch (e) {
-    console.error('Cache lookup failed:', e);
   }
 
   // Call AI
