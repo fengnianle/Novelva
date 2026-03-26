@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useSettingsStore, DEFAULT_SYSTEM_INSTRUCTION, DEFAULT_SENTENCE_INSTRUCTION, SYSTEM_PROMPT_FORMAT_SUFFIX, SENTENCE_PROMPT_FORMAT_SCHEMA, DEFAULT_DICTIONARY_APIS, DictionaryConfig, DEFAULT_VOCAB_ANALYSIS_PROMPTS, DEFAULT_VOCAB_ANALYSIS_FALLBACK } from '../../stores/settings-store';
-import { Sun, Moon, Type, AlignJustify, Key, BarChart3, ChevronDown, ChevronRight, RotateCcw, GraduationCap, Sparkles, Eye, EyeOff, Globe, Plus, Trash2, Lock, BookOpen, Cpu } from 'lucide-react';
+import { Sun, Moon, Type, AlignJustify, Key, BarChart3, ChevronDown, ChevronRight, RotateCcw, GraduationCap, Sparkles, Eye, EyeOff, Globe, Plus, Trash2, Lock, BookOpen, Cpu, Download, RefreshCw, ExternalLink, Info } from 'lucide-react';
 
 // Reusable settings card wrapper
 const SettingsCard: React.FC<{ children: React.ReactNode }> = ({ children }) => (
@@ -58,9 +58,35 @@ export const SettingsPanel: React.FC = () => {
   const [newDictLang, setNewDictLang] = useState('');
   const [newVocabLang, setNewVocabLang] = useState('');
 
+  // Update check state
+  const [appVersion, setAppVersion] = useState('');
+  const [updateChecking, setUpdateChecking] = useState(false);
+  const [updateResult, setUpdateResult] = useState<any>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+
   useEffect(() => {
     refreshTokenUsage();
+    // Load current app version
+    (window as any).electronAPI?.getAppVersion?.().then((v: string) => setAppVersion(v || ''));
   }, [refreshTokenUsage]);
+
+  const handleCheckUpdate = async () => {
+    setUpdateChecking(true);
+    setUpdateError(null);
+    setUpdateResult(null);
+    try {
+      const api = (window as any).electronAPI;
+      const result = await api?.checkForUpdate();
+      if (!result) {
+        setUpdateError('无法连接到 GitHub，请检查网络连接');
+      } else {
+        setUpdateResult(result);
+      }
+    } catch (err) {
+      setUpdateError(`检查失败: ${(err as Error).message}`);
+    }
+    setUpdateChecking(false);
+  };
 
   return (
     <div className="h-full flex flex-col">
@@ -500,6 +526,82 @@ export const SettingsPanel: React.FC = () => {
                 </button>
               </div>
             )}
+          </SettingsCard>
+
+          {/* About & Update */}
+          <SettingsCard>
+            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">关于与更新</div>
+
+            <SettingsRow icon={<Info size={16} />} label="Novelva" description={appVersion ? `当前版本 v${appVersion}` : '多语言 AI 阅读学习'}>
+              <a
+                href="#"
+                onClick={(e) => { e.preventDefault(); (window as any).electronAPI?.openReleasePage('https://github.com/fengnianle/Novelva'); }}
+                className="text-xs text-primary hover:text-primary/80 transition-colors flex items-center gap-1"
+              >
+                <ExternalLink size={12} />
+                GitHub
+              </a>
+            </SettingsRow>
+
+            <div className="border-t border-border pt-4">
+              <button
+                onClick={handleCheckUpdate}
+                disabled={updateChecking}
+                className="w-full py-2.5 rounded-lg border border-border hover:border-primary/50 hover:bg-primary/5 transition-all text-sm text-muted-foreground hover:text-primary flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {updateChecking ? (
+                  <><RefreshCw size={14} className="animate-spin" /> 正在检查...</>
+                ) : (
+                  <><Download size={14} /> 检查更新</>
+                )}
+              </button>
+
+              {updateError && (
+                <div className="mt-3 text-xs text-destructive">{updateError}</div>
+              )}
+
+              {updateResult && !updateResult.isNewer && (
+                <div className="mt-3 text-xs text-green-600 dark:text-green-400 flex items-center gap-1.5">
+                  ✓ 已是最新版本 (v{updateResult.version})
+                </div>
+              )}
+
+              {updateResult && updateResult.isNewer && (
+                <div className="mt-3 space-y-3 bg-primary/5 border border-primary/20 rounded-lg p-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-semibold text-primary">
+                      发现新版本 {updateResult.name}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">
+                      {updateResult.publishedAt ? new Date(updateResult.publishedAt).toLocaleDateString() : ''}
+                    </span>
+                  </div>
+                  {updateResult.body && (
+                    <div className="text-xs text-muted-foreground max-h-32 overflow-y-auto whitespace-pre-wrap leading-relaxed">
+                      {updateResult.body}
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2">
+                    {updateResult.downloadUrl && (
+                      <button
+                        onClick={() => (window as any).electronAPI?.downloadUpdate(updateResult.downloadUrl)}
+                        className="flex-1 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors flex items-center justify-center gap-2"
+                      >
+                        <Download size={14} />
+                        下载更新
+                      </button>
+                    )}
+                    <button
+                      onClick={() => (window as any).electronAPI?.openReleasePage(updateResult.htmlUrl)}
+                      className="py-2 px-4 rounded-lg border border-border text-sm text-muted-foreground hover:text-primary hover:border-primary/50 transition-all flex items-center gap-1.5"
+                    >
+                      <ExternalLink size={13} />
+                      查看详情
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </SettingsCard>
 
         </div>

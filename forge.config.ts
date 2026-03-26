@@ -25,7 +25,7 @@ const config: ForgeConfig = {
       name: 'Novelva',
       setupExe: 'Novelva-Setup.exe',
       setupIcon: path.resolve(__dirname, 'resources/icon.ico'),
-      description: 'AI-powered English reading learning desktop application',
+      description: 'AI 多语言阅读学习桌面应用',
       authors: '非菓',
     }),
     new MakerZIP({}, ['darwin']),

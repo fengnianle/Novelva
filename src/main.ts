@@ -6,6 +6,7 @@ import { registerDatabaseHandlers } from './ipc/database-handler';
 import { registerFileHandlers } from './ipc/file-handler';
 import { registerAiHandlers } from './ipc/ai-handler';
 import { registerDictHandlers } from './ipc/dict-handler';
+import { registerUpdateHandlers } from './ipc/update-handler';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
@@ -61,6 +62,7 @@ app.on('ready', async () => {
   registerFileHandlers();
   registerAiHandlers();
   registerDictHandlers();
+  registerUpdateHandlers();
   createWindow();
 });
 

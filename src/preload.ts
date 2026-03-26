@@ -30,4 +30,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   dictFetch: (url: string) => ipcRenderer.invoke('dict:fetch', url),
   getSettings: () => ipcRenderer.invoke('db:get-settings'),
   saveSetting: (key: string, value: string) => ipcRenderer.invoke('db:save-setting', key, value),
+  checkForUpdate: () => ipcRenderer.invoke('update:check'),
+  getAppVersion: () => ipcRenderer.invoke('update:get-version'),
+  openReleasePage: (url: string) => ipcRenderer.invoke('update:open-release', url),
+  downloadUpdate: (url: string) => ipcRenderer.invoke('update:download', url),
 });

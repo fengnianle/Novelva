@@ -2,7 +2,7 @@
   "name": "novelva",
   "productName": "Novelva",
   "version": "1.0.0",
-  "description": "AI-powered English reading learning desktop application",
+  "description": "AI 多语言阅读学习桌面应用",
   "main": ".vite/build/main.js",
   "private": true,
   "scripts": {
