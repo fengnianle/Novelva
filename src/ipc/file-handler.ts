@@ -4,9 +4,13 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 
 function getAdmZip() {
-  // Use createRequire to resolve from the app root, not from .vite/build/
-  const appRequire = createRequire(path.join(app.getAppPath(), 'package.json'));
-  return appRequire('adm-zip');
+  try {
+    const appRequire = createRequire(path.join(app.getAppPath(), 'package.json'));
+    return appRequire('adm-zip');
+  } catch {
+    const modulesPath = path.join(path.dirname(app.getPath('exe')), 'resources', 'modules');
+    return require(path.join(modulesPath, 'adm-zip'));
+  }
 }
 
 function stripHtmlTags(html: string): string {
@@ -127,8 +131,14 @@ export function registerFileHandlers(): void {
 
   ipcMain.handle('file:read-pdf', async (_event, filePath: string) => {
     try {
-      const appRequire = createRequire(path.join(app.getAppPath(), 'package.json'));
-      const pdfParse = appRequire('pdf-parse');
+      let pdfParse;
+      try {
+        const appRequire = createRequire(path.join(app.getAppPath(), 'package.json'));
+        pdfParse = appRequire('pdf-parse');
+      } catch {
+        const modulesPath = path.join(path.dirname(app.getPath('exe')), 'resources', 'modules');
+        pdfParse = require(path.join(modulesPath, 'pdf-parse'));
+      }
       const dataBuffer = fs.readFileSync(filePath);
       const result = await pdfParse(dataBuffer);
       return result.text || '';

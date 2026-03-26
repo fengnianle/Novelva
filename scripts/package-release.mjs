@@ -15,7 +15,7 @@ const packageJson = JSON.parse(fs.readFileSync(packagePath, 'utf-8'));
 const version = packageJson.version;
 
 // Paths
-const outDir = path.join(projectRoot, 'out');
+const outDir = path.join(projectRoot, 'out2');
 const appDir = path.join(outDir, 'Novelva-win32-x64');
 const releaseDir = path.join(outDir, 'release');
 

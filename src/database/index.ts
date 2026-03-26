@@ -6,9 +6,15 @@ import { createRequire } from 'node:module';
 let db: any = null;
 
 function getSqlJs() {
-  const appRequire = createRequire(path.join(app.getAppPath(), 'package.json'));
-  // Use the Node.js-compatible build
-  return appRequire('sql.js/dist/sql-wasm.js');
+  // In development, resolve from project node_modules
+  try {
+    const appRequire = createRequire(path.join(app.getAppPath(), 'package.json'));
+    return appRequire('sql.js/dist/sql-wasm.js');
+  } catch {
+    // In production, modules are copied to resources/modules/ by postPackage hook
+    const modulesPath = path.join(path.dirname(app.getPath('exe')), 'resources', 'modules');
+    return require(path.join(modulesPath, 'sql.js', 'dist', 'sql-wasm.js'));
+  }
 }
 
 function getDbPath(): string {
@@ -27,15 +33,17 @@ function getWasmPath(): string {
   );
   if (fs.existsSync(devPath)) return devPath;
 
-  // In production (asar), look in app.asar.unpacked or resources
+  // In production, postPackage hook copies modules to resources/modules/
   const prodPath = path.join(
     path.dirname(app.getPath('exe')),
     'resources',
+    'modules',
+    'sql.js',
+    'dist',
     'sql-wasm.wasm'
   );
   if (fs.existsSync(prodPath)) return prodPath;
 
-  // Fallback: let sql.js try to find it itself
   return '';
 }
 

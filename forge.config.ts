@@ -7,17 +7,32 @@ import { VitePlugin } from '@electron-forge/plugin-vite';
 import { FusesPlugin } from '@electron-forge/plugin-fuses';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
 import path from 'node:path';
+import fs from 'node:fs';
 
 const config: ForgeConfig = {
+  outDir: path.resolve(__dirname, 'out2'),
   packagerConfig: {
     asar: true,
     name: 'Novelva',
     executableName: 'Novelva',
     icon: path.resolve(__dirname, 'resources/icon'),
-    // Copy sql-wasm.wasm into resources/ so it's accessible outside asar at runtime
-    extraResource: [
-      path.resolve(__dirname, 'node_modules/sql.js/dist/sql-wasm.wasm'),
-    ],
+  },
+  hooks: {
+    postPackage: async (_config, result) => {
+      // Copy runtime-required node_modules into resources/modules/
+      // These are loaded via createRequire at runtime and not bundled by Vite
+      const outputPath = result.outputPaths[0];
+      const modulesDir = path.join(outputPath, 'resources', 'modules');
+      const modulesToCopy = ['sql.js', 'adm-zip', 'pdf-parse'];
+      for (const mod of modulesToCopy) {
+        const src = path.resolve(__dirname, 'node_modules', mod);
+        const dest = path.join(modulesDir, mod);
+        if (fs.existsSync(src)) {
+          fs.cpSync(src, dest, { recursive: true });
+          console.log(`  ✔ Copied ${mod} to resources/modules/`);
+        }
+      }
+    },
   },
   rebuildConfig: {},
   makers: [
@@ -60,7 +75,6 @@ const config: ForgeConfig = {
       [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false,
       [FuseV1Options.EnableNodeCliInspectArguments]: false,
       [FuseV1Options.EnableEmbeddedAsarIntegrityValidation]: true,
-      // Must be false — we load sql-wasm.wasm from extraResource outside asar
       [FuseV1Options.OnlyLoadAppFromAsar]: false,
     }),
   ],
