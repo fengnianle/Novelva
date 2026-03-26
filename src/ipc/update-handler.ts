@@ -309,28 +309,30 @@ export function registerUpdateHandlers(): void {
       // Step 5: Create a batch script to replace files after app exits
       const batchPath = path.join(tempDir, 'apply-update.bat');
       const exePath = app.getPath('exe');
+      const exeName = path.basename(exePath);
       const batchContent = [
         '@echo off',
         'chcp 65001 >nul',
-        // Wait for the app to fully exit
-        'echo 正在等待 Novelva 退出...',
+        // Wait for ALL Novelva processes to exit (not just one PID)
+        'set RETRIES=0',
         ':waitloop',
-        `tasklist /FI "PID eq %1" 2>nul | find /I "Novelva" >nul`,
+        `tasklist /FI "IMAGENAME eq ${exeName}" 2>nul | find /I "${exeName}" >nul`,
         'if not errorlevel 1 (',
+        '  set /a RETRIES+=1',
+        '  if %RETRIES% GEQ 30 (',
+        '    echo Timeout waiting for app to exit.',
+        '    exit /b 1',
+        '  )',
         '  timeout /t 1 /nobreak >nul',
         '  goto waitloop',
         ')',
         'timeout /t 1 /nobreak >nul',
         // Copy new files over old ones
-        'echo 正在更新文件...',
-        `xcopy /E /Y /I /Q "${sourceDir}\\*" "${appDir}\\"`,
+        `xcopy /E /Y /I /Q "${sourceDir}\\*" "${appDir}\\" >nul 2>&1`,
         'if errorlevel 1 (',
-        '  echo 更新失败！',
-        '  pause',
         '  exit /b 1',
         ')',
         // Restart the app
-        'echo 更新完成，正在重启...',
         `start "" "${exePath}"`,
         // Clean up temp files
         `rmdir /S /Q "${tempDir}" 2>nul`,
@@ -338,12 +340,15 @@ export function registerUpdateHandlers(): void {
 
       fs.writeFileSync(batchPath, batchContent, 'utf-8');
 
-      // Step 6: Launch the batch script (detached) passing current PID, then quit
+      // Step 6: Create a VBS wrapper to launch the batch script completely hidden
+      const vbsPath = path.join(tempDir, 'apply-update.vbs');
+      const vbsContent = `Set WshShell = CreateObject("WScript.Shell")\r\nWshShell.Run chr(34) & "${batchPath}" & chr(34), 0, False`;
+      fs.writeFileSync(vbsPath, vbsContent, 'utf-8');
+
       sendProgress('restarting', 95, '即将重启应用...');
-      const child = spawn('cmd.exe', ['/c', batchPath, String(process.pid)], {
+      const child = spawn('wscript.exe', [vbsPath], {
         detached: true,
         stdio: 'ignore',
-        windowsHide: true,
       });
       child.unref();
 
