@@ -24,7 +24,7 @@ export const Sidebar: React.FC = () => {
     <aside className="w-[68px] bg-secondary/30 border-r border-border flex flex-col items-center">
       <div className="w-full flex flex-col items-center pt-3 pb-2">
         <button
-          onClick={() => window.open('https://github.com/feiguo2024/readingapp', '_blank')}
+          onClick={() => window.open('https://github.com/fengnianle/Novelva', '_blank')}
           className="w-9 h-9 rounded-xl overflow-hidden shadow-sm hover:opacity-80 transition-opacity cursor-pointer"
           title="访问 GitHub 仓库"
         >
