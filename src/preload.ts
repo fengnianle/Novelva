@@ -7,7 +7,27 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readEpub: (filePath: string) => ipcRenderer.invoke('file:read-epub', filePath),
   dbQuery: (sql: string, params?: any[]) => ipcRenderer.invoke('db:query', sql, params),
   dbRun: (sql: string, params?: any[]) => ipcRenderer.invoke('db:run', sql, params),
-  callAI: (prompt: string, apiKey: string, systemPrompt?: string) => ipcRenderer.invoke('ai:call', prompt, apiKey, systemPrompt),
+  callAI: (prompt: string, apiKey: string, systemPrompt?: string, providerBaseUrl?: string, model?: string) =>
+    ipcRenderer.invoke('ai:call', prompt, apiKey, systemPrompt, providerBaseUrl, model),
+  callAIStream: (prompt: string, apiKey: string, systemPrompt?: string, providerBaseUrl?: string, model?: string, streamId?: string) =>
+    ipcRenderer.invoke('ai:call-stream', prompt, apiKey, systemPrompt, providerBaseUrl, model, streamId),
+  onStreamChunk: (streamId: string, cb: (chunk: string) => void) => {
+    const handler = (_event: any, chunk: string) => cb(chunk);
+    ipcRenderer.on(`ai:stream-chunk:${streamId}`, handler);
+    return () => ipcRenderer.removeListener(`ai:stream-chunk:${streamId}`, handler);
+  },
+  onStreamDone: (streamId: string, cb: (full: string) => void) => {
+    const handler = (_event: any, full: string) => cb(full);
+    ipcRenderer.on(`ai:stream-done:${streamId}`, handler);
+    return () => ipcRenderer.removeListener(`ai:stream-done:${streamId}`, handler);
+  },
+  onStreamError: (streamId: string, cb: (err: string) => void) => {
+    const handler = (_event: any, err: string) => cb(err);
+    ipcRenderer.on(`ai:stream-error:${streamId}`, handler);
+    return () => ipcRenderer.removeListener(`ai:stream-error:${streamId}`, handler);
+  },
+  getAIProviders: () => ipcRenderer.invoke('ai:get-providers'),
+  dictFetch: (url: string) => ipcRenderer.invoke('dict:fetch', url),
   getSettings: () => ipcRenderer.invoke('db:get-settings'),
   saveSetting: (key: string, value: string) => ipcRenderer.invoke('db:save-setting', key, value),
 });

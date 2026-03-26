@@ -6,25 +6,36 @@ import { MakerRpm } from '@electron-forge/maker-rpm';
 import { VitePlugin } from '@electron-forge/plugin-vite';
 import { FusesPlugin } from '@electron-forge/plugin-fuses';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
+import path from 'node:path';
 
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
+    name: 'Novelva',
+    executableName: 'Novelva',
+    icon: path.resolve(__dirname, 'resources/icon'),
+    // Copy sql-wasm.wasm into resources/ so it's accessible outside asar at runtime
+    extraResource: [
+      path.resolve(__dirname, 'node_modules/sql.js/dist/sql-wasm.wasm'),
+    ],
   },
   rebuildConfig: {},
   makers: [
-    new MakerSquirrel({}),
+    new MakerSquirrel({
+      name: 'Novelva',
+      setupExe: 'Novelva-Setup.exe',
+      setupIcon: path.resolve(__dirname, 'resources/icon.ico'),
+      description: 'AI-powered English reading learning desktop application',
+      authors: '非菓',
+    }),
     new MakerZIP({}, ['darwin']),
     new MakerRpm({}),
     new MakerDeb({}),
   ],
   plugins: [
     new VitePlugin({
-      // `build` can specify multiple entry builds, which can be Main process, Preload scripts, Worker process, etc.
-      // If you are familiar with Vite configuration, it will look really familiar.
       build: [
         {
-          // `entry` is just an alias for `build.lib.entry` in the corresponding file of `config`.
           entry: 'src/main.ts',
           config: 'vite.main.config.ts',
           target: 'main',
@@ -42,8 +53,6 @@ const config: ForgeConfig = {
         },
       ],
     }),
-    // Fuses are used to enable/disable various Electron functionality
-    // at package time, before code signing the application
     new FusesPlugin({
       version: FuseVersion.V1,
       [FuseV1Options.RunAsNode]: false,
@@ -51,7 +60,8 @@ const config: ForgeConfig = {
       [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false,
       [FuseV1Options.EnableNodeCliInspectArguments]: false,
       [FuseV1Options.EnableEmbeddedAsarIntegrityValidation]: true,
-      [FuseV1Options.OnlyLoadAppFromAsar]: true,
+      // Must be false — we load sql-wasm.wasm from extraResource outside asar
+      [FuseV1Options.OnlyLoadAppFromAsar]: false,
     }),
   ],
 };

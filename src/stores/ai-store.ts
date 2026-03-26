@@ -2,6 +2,7 @@ import { create } from 'zustand';
 
 export interface WordAnalysis {
   word: string;
+  surface?: string;
   meaning: string;
   pos: string;
 }
@@ -12,8 +13,16 @@ export interface KeyExpression {
   usage: string;
 }
 
+export interface GrammarPoint {
+  point: string;
+  explanation: string;
+  example?: string;
+}
+
 export interface SentenceAnalysis {
+  language?: string;
   translation: string;
+  grammar_points: GrammarPoint[];
   key_expressions: KeyExpression[];
   explanation: string;
   words: WordAnalysis[];

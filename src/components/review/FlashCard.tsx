@@ -1,8 +1,13 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useVocabulary, VocabularyRow } from '../../hooks/use-vocabulary';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useReaderStore } from '../../stores/reader-store';
-import { GraduationCap, ThumbsUp, ThumbsDown, RotateCw, CheckCircle2 } from 'lucide-react';
+import { GraduationCap, ThumbsUp, ThumbsDown, RotateCw, CheckCircle2, Filter } from 'lucide-react';
+
+const LANG_LABELS: Record<string, string> = {
+  en: 'English', ja: '日本語', de: 'Deutsch', fr: 'Français',
+  es: 'Español', ko: '한국어', ru: 'Русский', it: 'Italiano', pt: 'Português',
+};
 
 interface ReviewWord extends VocabularyRow {
   ease_factor?: number;
@@ -19,6 +24,8 @@ export const FlashCard: React.FC = () => {
   const [reviewed, setReviewed] = useState(0);
   const [remembered, setRemembered] = useState(0);
   const [sessionComplete, setSessionComplete] = useState(false);
+  const [filterLang, setFilterLang] = useState<string>('all');
+  const [filterSource, setFilterSource] = useState<string>('all');
   const initialized = useRef(false);
 
   const viewMode = useReaderStore((s) => s.viewMode);
@@ -31,14 +38,35 @@ export const FlashCard: React.FC = () => {
     }
   }, [viewMode, loadVocabulary]);
 
+  // Compute available languages and source files
+  const { languages, sourceFiles } = useMemo(() => {
+    const langSet = new Set<string>();
+    const sourceSet = new Set<string>();
+    for (const item of rawItems) {
+      langSet.add(item.language || 'en');
+      if (item.source_file) sourceSet.add(item.source_file);
+    }
+    return { languages: Array.from(langSet).sort(), sourceFiles: Array.from(sourceSet).sort() };
+  }, [rawItems]);
+
+  // Filter rawItems based on selected filters
+  const filteredItems = useMemo(() => {
+    let items = rawItems;
+    if (filterLang !== 'all') items = items.filter((i) => (i.language || 'en') === filterLang);
+    if (filterSource !== 'all') items = items.filter((i) => i.source_file === filterSource);
+    return items;
+  }, [rawItems, filterLang, filterSource]);
+
   // Build review queue using spaced repetition schedule
   const buildQueue = useCallback(async () => {
     const api = (window as any).electronAPI;
-    if (!api || rawItems.length === 0) return;
+    if (!api || filteredItems.length === 0) return;
+
+    const filteredWordSet = new Set(filteredItems.map((i) => i.word.toLowerCase()));
 
     try {
       // Ensure all vocabulary words have a review_schedule entry
-      for (const item of rawItems) {
+      for (const item of filteredItems) {
         await api.dbRun(
           'INSERT OR IGNORE INTO review_schedule (word) VALUES (?)',
           [item.word.toLowerCase()]
@@ -47,26 +75,29 @@ export const FlashCard: React.FC = () => {
 
       // Get words due for review (next_review_date <= today), ordered by urgency
       const dueRows = await api.dbQuery(
-        `SELECT rs.*, v.meaning, v.sentence, v.sentence_translation
+        `SELECT rs.*, v.meaning, v.sentence, v.sentence_translation, v.source_file, v.language
          FROM review_schedule rs
          JOIN vocabulary v ON LOWER(v.word) = rs.word
          WHERE rs.next_review_date <= date('now')
          GROUP BY rs.word
          ORDER BY rs.next_review_date ASC, rs.ease_factor ASC
          LIMIT ?`,
-        [dailyReviewCount]
+        [dailyReviewCount * 2]
       );
 
-      if (dueRows && dueRows.length > 0) {
-        setQueue(dueRows);
+      // Filter due rows by the current filter set
+      const filteredDue = (dueRows || []).filter((r: any) => filteredWordSet.has(r.word.toLowerCase())).slice(0, dailyReviewCount);
+
+      if (filteredDue.length > 0) {
+        setQueue(filteredDue);
         setCurrentIdx(0);
         setShowAnswer(false);
         setReviewed(0);
         setRemembered(0);
         setSessionComplete(false);
       } else {
-        // No words due — pick random from vocab for extra practice
-        const shuffled = [...rawItems].sort(() => Math.random() - 0.5).slice(0, dailyReviewCount);
+        // No words due — pick random from filtered vocab for extra practice
+        const shuffled = [...filteredItems].sort(() => Math.random() - 0.5).slice(0, dailyReviewCount);
         setQueue(shuffled);
         setCurrentIdx(0);
         setShowAnswer(false);
@@ -76,10 +107,10 @@ export const FlashCard: React.FC = () => {
       }
     } catch (e) {
       console.error('Failed to build review queue:', e);
-      const shuffled = [...rawItems].sort(() => Math.random() - 0.5).slice(0, dailyReviewCount);
+      const shuffled = [...filteredItems].sort(() => Math.random() - 0.5).slice(0, dailyReviewCount);
       setQueue(shuffled);
     }
-  }, [rawItems, dailyReviewCount]);
+  }, [filteredItems, dailyReviewCount]);
 
   useEffect(() => {
     if (rawItems.length > 0 && !initialized.current) {
@@ -87,6 +118,13 @@ export const FlashCard: React.FC = () => {
       buildQueue();
     }
   }, [rawItems, buildQueue]);
+
+  // Rebuild queue when filters change
+  useEffect(() => {
+    if (rawItems.length > 0) {
+      initialized.current = false;
+    }
+  }, [filterLang, filterSource]);
 
   // SM-2 algorithm: update schedule based on user response
   const handleResponse = useCallback(async (remembered: boolean) => {
@@ -208,8 +246,38 @@ export const FlashCard: React.FC = () => {
           </button>
         </div>
         <p className="text-sm text-muted-foreground mt-1">
-          进度 {currentIdx + 1}/{queue.length} · 词库共 {rawItems.length} 词
+          进度 {currentIdx + 1}/{queue.length} · 词库共 {filteredItems.length} 词
+          {filteredItems.length !== rawItems.length && ` (全部 ${rawItems.length})`}
         </p>
+        {(languages.length > 1 || sourceFiles.length > 0) && (
+          <div className="flex items-center gap-2 mt-2 flex-wrap">
+            <Filter size={12} className="text-muted-foreground shrink-0" />
+            {languages.length > 1 && (
+              <select
+                value={filterLang}
+                onChange={(e) => setFilterLang(e.target.value)}
+                className="text-xs bg-secondary/50 border border-border rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary/50"
+              >
+                <option value="all">全部语言</option>
+                {languages.map((l) => (
+                  <option key={l} value={l}>{LANG_LABELS[l] || l.toUpperCase()}</option>
+                ))}
+              </select>
+            )}
+            {sourceFiles.length > 0 && (
+              <select
+                value={filterSource}
+                onChange={(e) => setFilterSource(e.target.value)}
+                className="text-xs bg-secondary/50 border border-border rounded-md px-2 py-1 focus:outline-none focus:ring-1 focus:ring-primary/50 max-w-[200px] truncate"
+              >
+                <option value="all">全部来源</option>
+                {sourceFiles.map((f) => (
+                  <option key={f} value={f}>{f}</option>
+                ))}
+              </select>
+            )}
+          </div>
+        )}
         <div className="mt-2 h-1.5 bg-secondary rounded-full overflow-hidden">
           <div
             className="h-full bg-primary rounded-full transition-all duration-300"

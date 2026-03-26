@@ -3,7 +3,8 @@ import { useReaderStore } from '../../stores/reader-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useFileImport } from '../../hooks/use-file-import';
 import { Paragraph, resetSharedObserver } from './Paragraph';
-import { FolderOpen, BookOpen, Loader2 } from 'lucide-react';
+import { FolderOpen, BookOpen, Loader2, ArrowLeft } from 'lucide-react';
+import { SelectionAskButton } from '../ai/SelectionAskButton';
 
 function getScrollPercent(el: HTMLDivElement): number {
   if (el.scrollHeight <= el.clientHeight) return 100;
@@ -203,9 +204,18 @@ export const ReaderView: React.FC = () => {
   return (
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-6 py-2.5 pr-[150px] border-b border-border bg-background/80 backdrop-blur-sm">
-        <h1 className="text-sm font-medium truncate text-muted-foreground flex-1 mr-4">
-          {currentBook.fileName}
-        </h1>
+        <div className="flex items-center gap-2 flex-1 min-w-0 mr-4">
+          <button
+            onClick={() => useReaderStore.getState().setCurrentBook(null)}
+            className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded hover:bg-accent shrink-0"
+            title="返回书架"
+          >
+            <ArrowLeft size={16} />
+          </button>
+          <h1 className="text-sm font-medium truncate text-muted-foreground">
+            {currentBook.fileName}
+          </h1>
+        </div>
         <div className="flex items-center gap-3">
           <span ref={progressTextRef} className="text-xs text-muted-foreground tabular-nums">
             0%
@@ -233,6 +243,7 @@ export const ReaderView: React.FC = () => {
       >
         <ReaderContent paragraphs={currentBook.paragraphs} />
       </div>
+      <SelectionAskButton containerRef={scrollRef} />
     </div>
   );
 };

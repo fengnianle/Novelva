@@ -60,6 +60,7 @@ export async function initDatabase(): Promise<any> {
   }
 
   createTables(db);
+  migrateSchema(db);
   saveDatabase();
 
   return db;
@@ -133,6 +134,31 @@ function createTables(database: any): void {
       value TEXT NOT NULL
     )
   `);
+
+  database.run(`
+    CREATE TABLE IF NOT EXISTS vocab_analysis_cache (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      word TEXT UNIQUE NOT NULL,
+      language TEXT DEFAULT 'en',
+      analysis_text TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+}
+
+// Add columns introduced after initial schema — safe to run repeatedly
+function migrateSchema(database: any): void {
+  const addColumn = (table: string, column: string, type: string) => {
+    try {
+      database.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    } catch (_) { /* column already exists — ignore */ }
+  };
+
+  addColumn('vocabulary', 'language', "TEXT DEFAULT 'en'");
+  addColumn('vocabulary', 'pos', "TEXT DEFAULT ''");
+  addColumn('sentence_cache', 'language', "TEXT DEFAULT 'en'");
+  addColumn('sentence_cache', 'grammar_points', "TEXT DEFAULT '[]'");
+  addColumn('reading_progress', 'language', "TEXT DEFAULT 'en'");
 }
 
 export function saveDatabase(): void {

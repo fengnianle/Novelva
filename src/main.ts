@@ -5,6 +5,7 @@ import { initDatabase } from './database/index';
 import { registerDatabaseHandlers } from './ipc/database-handler';
 import { registerFileHandlers } from './ipc/file-handler';
 import { registerAiHandlers } from './ipc/ai-handler';
+import { registerDictHandlers } from './ipc/dict-handler';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (started) {
@@ -43,7 +44,10 @@ const createWindow = () => {
     );
   }
 
-  mainWindow.webContents.openDevTools();
+  // Only open DevTools in development
+  if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
+    mainWindow.webContents.openDevTools();
+  }
 };
 
 app.on('ready', async () => {
@@ -56,6 +60,7 @@ app.on('ready', async () => {
   registerDatabaseHandlers();
   registerFileHandlers();
   registerAiHandlers();
+  registerDictHandlers();
   createWindow();
 });
 

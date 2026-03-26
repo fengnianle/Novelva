@@ -21,7 +21,7 @@ export const WordPopover: React.FC<WordPopoverProps> = ({
   const { getFromWordCache, addToWordCache, currentAnalysis } = useAiStore();
   const { addToVocabulary } = useVocabulary();
   const { currentBook } = useReaderStore();
-  const { apiKey } = useSettingsStore();
+  const { apiKey, getProviderConfig } = useSettingsStore();
   const popoverRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ top: 0, left: 0 });
   const [added, setAdded] = useState(false);
@@ -84,13 +84,15 @@ export const WordPopover: React.FC<WordPopoverProps> = ({
 
       setWordLoading(true);
       try {
-        const prompt = `请解释英语单词 "${word}" 在以下句子中的含义：
-"${sentence}"
+        const prompt = `请解释以下单词在句子中的含义（自动识别语言）：
+单词: "${word}"
+句子: "${sentence}"
 
 请严格按以下 JSON 格式返回（不要添加任何其他内容，不要使用 markdown 代码块）：
-{"word": "${word}", "meaning": "在此语境下的中文含义", "pos": "词性（如 n./v./adj./adv.等）"}`;
+{"word": "${word}", "meaning": "在此语境下的中文含义", "pos": "词性"}`;
 
-        const rawResponse = await api.callAI(prompt, apiKey);
+        const { baseUrl, model } = getProviderConfig();
+        const rawResponse = await api.callAI(prompt, apiKey, undefined, baseUrl, model);
         let jsonStr = rawResponse.trim();
         if (jsonStr.startsWith('```')) {
           jsonStr = jsonStr.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
@@ -99,7 +101,6 @@ export const WordPopover: React.FC<WordPopoverProps> = ({
         setWordData(result);
         addToWordCache(word, result);
 
-        // Also cache in DB
         try {
           await api.dbRun(
             'INSERT OR IGNORE INTO word_cache (word, meaning, pos) VALUES (?, ?, ?)',
@@ -138,8 +139,8 @@ export const WordPopover: React.FC<WordPopoverProps> = ({
       if (!api) return;
       try {
         const rows = await api.dbQuery(
-          'SELECT id FROM vocabulary WHERE word = ? AND sentence = ?',
-          [word.toLowerCase(), sentence]
+          'SELECT id FROM vocabulary WHERE LOWER(word) = LOWER(?) AND sentence = ?',
+          [word, sentence]
         );
         if (rows && rows.length > 0) setAdded(true);
       } catch (_) { /* ignore */ }
@@ -149,12 +150,30 @@ export const WordPopover: React.FC<WordPopoverProps> = ({
 
   const handleAdd = useCallback(async () => {
     if (!wordData || added) return;
+    let saveWord = word;
+    let savePos = wordData.pos || '';
+    if (currentAnalysis?.language === 'de') {
+      const articleMatch = word.match(/^(der|die|das)\s+/i);
+      if (articleMatch) {
+        const article = articleMatch[1].toLowerCase();
+        saveWord = word.replace(/^(der|die|das|ein|eine|einen|einem|einer|eines)\s+/i, '');
+        if (savePos && !savePos.toLowerCase().includes(article)) {
+          savePos = `${article}, ${savePos}`;
+        } else if (!savePos) {
+          savePos = article;
+        }
+      } else {
+        saveWord = word.replace(/^(ein|eine|einen|einem|einer|eines)\s+/i, '');
+      }
+    }
     await addToVocabulary(
-      word,
+      saveWord,
       wordData.meaning,
       sentence,
       currentAnalysis?.translation,
-      currentBook?.fileName
+      currentBook?.fileName,
+      currentAnalysis?.language,
+      savePos
     );
     setAdded(true);
   }, [word, wordData, sentence, added, addToVocabulary, currentAnalysis, currentBook]);

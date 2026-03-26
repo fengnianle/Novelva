@@ -2,6 +2,7 @@ import React from 'react';
 import { BookOpen, Library, GraduationCap, Settings } from 'lucide-react';
 import { useReaderStore, ViewMode } from '../../stores/reader-store';
 import { cn } from '../../lib/utils';
+import appIconUrl from '../../../resources/icon-48.png';
 
 interface NavItem {
   icon: React.ElementType;
@@ -22,9 +23,13 @@ export const Sidebar: React.FC = () => {
   return (
     <aside className="w-[68px] bg-secondary/30 border-r border-border flex flex-col items-center">
       <div className="w-full flex flex-col items-center pt-3 pb-2">
-        <div className="w-9 h-9 rounded-xl bg-primary/90 flex items-center justify-center shadow-sm">
-          <span className="text-primary-foreground font-bold text-sm">Nv</span>
-        </div>
+        <button
+          onClick={() => window.open('https://github.com/feiguo2024/readingapp', '_blank')}
+          className="w-9 h-9 rounded-xl overflow-hidden shadow-sm hover:opacity-80 transition-opacity cursor-pointer"
+          title="访问 GitHub 仓库"
+        >
+          <img src={appIconUrl} alt="Novelva" className="w-full h-full object-cover" />
+        </button>
         <span className="text-[9px] font-medium text-muted-foreground mt-1 tracking-tight">Novelva</span>
       </div>
 

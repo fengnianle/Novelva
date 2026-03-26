@@ -6,6 +6,45 @@ import { SentenceData } from '../../lib/sentence-splitter';
 import { analyzeSentence } from '../../hooks/use-ai-analysis';
 import { X, Loader2, BookPlus, Check, RotateCw } from 'lucide-react';
 
+// Animated skeleton loading component for sentence analysis
+const LoadingSkeleton: React.FC = () => {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setElapsed((e) => e + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  return (
+    <div className="space-y-3 py-2 animate-in fade-in-0 duration-300">
+      <div className="flex items-center gap-2">
+        <Loader2 size={14} className="animate-spin text-primary shrink-0" />
+        <span className="text-xs text-muted-foreground">
+          AI 正在解析{elapsed > 0 ? ` (${elapsed}s)` : '...'}
+        </span>
+      </div>
+      {/* Translation skeleton */}
+      <div className="space-y-1.5">
+        <div className="h-3 bg-secondary/60 rounded animate-pulse w-16" />
+        <div className="h-4 bg-secondary/40 rounded animate-pulse w-full" />
+      </div>
+      {/* Grammar points skeleton */}
+      <div className="space-y-1.5">
+        <div className="h-3 bg-secondary/60 rounded animate-pulse w-12" />
+        <div className="h-8 bg-secondary/30 rounded animate-pulse w-full" />
+      </div>
+      {/* Words skeleton */}
+      <div className="space-y-1.5">
+        <div className="h-3 bg-secondary/60 rounded animate-pulse w-10" />
+        <div className="flex gap-1.5">
+          <div className="h-6 bg-secondary/30 rounded animate-pulse w-20" />
+          <div className="h-6 bg-secondary/30 rounded animate-pulse w-24" />
+          <div className="h-6 bg-secondary/30 rounded animate-pulse w-16" />
+        </div>
+      </div>
+    </div>
+  );
+};
+
 interface SentencePopoverProps {
   anchorRef: React.RefObject<HTMLSpanElement | null>;
   sentence: SentenceData;
@@ -42,8 +81,8 @@ export const SentencePopover: React.FC<SentencePopoverProps> = ({
       for (const w of currentAnalysis.words) {
         try {
           const rows = await api.dbQuery(
-            'SELECT id FROM vocabulary WHERE word = ? AND sentence = ?',
-            [w.word.toLowerCase(), sentence.text]
+            'SELECT id FROM vocabulary WHERE LOWER(word) = LOWER(?) AND sentence = ?',
+            [w.word, sentence.text]
           );
           if (rows && rows.length > 0) existing.add(w.word);
         } catch (_) { /* ignore */ }
@@ -96,13 +135,33 @@ export const SentencePopover: React.FC<SentencePopoverProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [onClose, anchorRef]);
 
-  const handleAddWord = async (word: string, meaning: string) => {
+  const handleAddWord = async (word: string, meaning: string, pos?: string) => {
+    // Strip German articles (der/die/das) from word — store base word only
+    let saveWord = word;
+    let savePos = pos || '';
+    if (currentAnalysis?.language === 'de') {
+      const articleMatch = word.match(/^(der|die|das)\s+/i);
+      if (articleMatch) {
+        const article = articleMatch[1].toLowerCase();
+        saveWord = word.replace(/^(der|die|das|ein|eine|einen|einem|einer|eines)\s+/i, '');
+        // Prepend article to POS so gender is preserved (e.g., "der, 名词")
+        if (savePos && !savePos.toLowerCase().includes(article)) {
+          savePos = `${article}, ${savePos}`;
+        } else if (!savePos) {
+          savePos = article;
+        }
+      } else {
+        saveWord = word.replace(/^(ein|eine|einen|einem|einer|eines)\s+/i, '');
+      }
+    }
     await addToVocabulary(
-      word,
+      saveWord,
       meaning,
       sentence.text,
       currentAnalysis?.translation,
-      currentBook?.fileName
+      currentBook?.fileName,
+      currentAnalysis?.language,
+      savePos
     );
     setAddedWords((prev) => new Set([...prev, word]));
   };
@@ -135,12 +194,7 @@ export const SentencePopover: React.FC<SentencePopoverProps> = ({
       </div>
 
       <div className="px-4 py-3 max-h-[400px] overflow-y-auto">
-        {loading && (
-          <div className="flex items-center justify-center py-8 gap-2 text-muted-foreground">
-            <Loader2 size={16} className="animate-spin" />
-            <span className="text-sm">正在解析...</span>
-          </div>
-        )}
+        {loading && <LoadingSkeleton />}
 
         {error && (
           <div className="text-sm text-destructive py-2">{error}</div>
@@ -148,10 +202,33 @@ export const SentencePopover: React.FC<SentencePopoverProps> = ({
 
         {!loading && !error && currentAnalysis && (
           <div className="space-y-3">
-            <div>
-              <div className="text-xs font-medium text-muted-foreground mb-1">翻译</div>
-              <div className="text-sm">{currentAnalysis.translation}</div>
+            <div className="flex items-center gap-2">
+              {currentAnalysis.language && (
+                <span className="text-[10px] font-semibold uppercase bg-primary/10 text-primary px-1.5 py-0.5 rounded">
+                  {currentAnalysis.language}
+                </span>
+              )}
+              <div className="text-sm flex-1">{currentAnalysis.translation}</div>
             </div>
+
+            {currentAnalysis.grammar_points && currentAnalysis.grammar_points.length > 0 && (
+              <div>
+                <div className="text-xs font-medium text-muted-foreground mb-1">语法点</div>
+                <div className="space-y-1.5">
+                  {currentAnalysis.grammar_points.map((gp, idx) => (
+                    <div key={idx} className="text-sm bg-secondary/40 rounded-md px-2.5 py-1.5">
+                      <span className="font-medium text-primary">{gp.point}</span>
+                      <span className="text-muted-foreground"> — {gp.explanation}</span>
+                      {gp.example && (
+                        <div className="text-xs text-muted-foreground/80 mt-0.5 italic">
+                          {gp.example}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {currentAnalysis.key_expressions.length > 0 && (
               <div>
@@ -193,12 +270,15 @@ export const SentencePopover: React.FC<SentencePopoverProps> = ({
                       className="group inline-flex items-center gap-1 text-xs bg-secondary px-2 py-1 rounded-md"
                     >
                       <span className="font-medium">{w.word}</span>
+                      {w.surface && w.surface !== w.word && (
+                        <span className="text-muted-foreground/60">[{w.surface}]</span>
+                      )}
                       <span className="text-muted-foreground">
                         ({w.pos}) {w.meaning}
                       </span>
                       {!addedWords.has(w.word) && (
                         <button
-                          onClick={() => handleAddWord(w.word, w.meaning)}
+                          onClick={() => handleAddWord(w.word, w.meaning, w.pos)}
                           className="ml-0.5 text-muted-foreground hover:text-primary transition-colors opacity-0 group-hover:opacity-100"
                           title="加入词汇本"
                         >
