@@ -86,6 +86,8 @@ export const SettingsPanel: React.FC = () => {
       const result = await api?.checkForUpdate();
       if (!result) {
         setUpdateError('无法连接到 GitHub，请检查网络连接');
+      } else if (result.error) {
+        setUpdateError(result.error);
       } else {
         setUpdateResult(result);
       }

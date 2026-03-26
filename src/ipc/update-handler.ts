@@ -1,4 +1,4 @@
-import { ipcMain, shell, app, BrowserWindow } from 'electron';
+import { ipcMain, shell, app, BrowserWindow, net } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -14,6 +14,7 @@ interface ReleaseInfo {
   zipUrl: string | null;
   publishedAt: string;
   isNewer: boolean;
+  error?: string;
 }
 
 function compareVersions(current: string, latest: string): boolean {
@@ -36,43 +37,177 @@ function sendProgress(stage: string, percent: number, detail?: string) {
 }
 
 export function registerUpdateHandlers(): void {
-  // Check for updates from GitHub Releases
-  ipcMain.handle('update:check', async (): Promise<ReleaseInfo | null> => {
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 15000);
-      const response = await fetch(GITHUB_API_URL, {
-        headers: {
-          'Accept': 'application/vnd.github.v3+json',
-          'User-Agent': 'Novelva-Updater',
-        },
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
+  // Parse GitHub API response JSON into ReleaseInfo
+  function parseApiResponse(data: any): ReleaseInfo {
+    const currentVersion = app.getVersion();
+    const latestVersion = (data.tag_name || '').replace(/^v/, '');
+    const zipAsset = data.assets?.find((a: any) =>
+      a.name.toLowerCase().endsWith('.zip')
+    );
+    return {
+      version: latestVersion,
+      name: data.name || `v${latestVersion}`,
+      body: data.body || '',
+      htmlUrl: data.html_url || `https://github.com/${GITHUB_REPO}/releases/latest`,
+      zipUrl: zipAsset?.browser_download_url || null,
+      publishedAt: data.published_at || '',
+      isNewer: compareVersions(currentVersion, latestVersion),
+    };
+  }
 
-      if (!response.ok) return null;
-      const data = await response.json();
+  // Try GitHub API via Electron net.fetch (respects system proxy)
+  async function checkViaNetFetch(): Promise<ReleaseInfo | null> {
+    const response = await net.fetch(GITHUB_API_URL, {
+      headers: {
+        'Accept': 'application/vnd.github.v3+json',
+        'User-Agent': 'Novelva-Updater',
+      },
+    });
 
+    if (response.status === 404) {
       const currentVersion = app.getVersion();
-      const latestVersion = (data.tag_name || '').replace(/^v/, '');
+      return {
+        version: currentVersion, name: `v${currentVersion}`, body: '',
+        htmlUrl: `https://github.com/${GITHUB_REPO}/releases`,
+        zipUrl: null, publishedAt: '', isNewer: false,
+        error: '暂无已发布的版本',
+      };
+    }
+    if (response.status === 403) return null; // rate limited
+    if (!response.ok) return null;
 
-      // Find .zip asset (preferred for auto-update)
-      const zipAsset = data.assets?.find((a: any) =>
-        a.name.toLowerCase().endsWith('.zip')
-      );
+    const data = await response.json();
+    return parseApiResponse(data);
+  }
+
+  // Try GitHub API via Node.js https (different connection, may bypass rate limit)
+  async function checkViaNodeHttps(): Promise<ReleaseInfo | null> {
+    const res = await httpsGet(GITHUB_API_URL, false, { 'Accept': 'application/vnd.github.v3+json' });
+    if (res.statusCode === 404) {
+      const currentVersion = app.getVersion();
+      return {
+        version: currentVersion, name: `v${currentVersion}`, body: '',
+        htmlUrl: `https://github.com/${GITHUB_REPO}/releases`,
+        zipUrl: null, publishedAt: '', isNewer: false,
+        error: '暂无已发布的版本',
+      };
+    }
+    if (res.statusCode !== 200) return null;
+    const data = JSON.parse(res.body);
+    return parseApiResponse(data);
+  }
+
+  // Node.js https helper with optional custom headers and redirect control
+  function httpsGet(url: string, followRedirect: boolean, extraHeaders?: Record<string, string>): Promise<{ statusCode: number; headers: any; body: string }> {
+    const https = require('node:https');
+    const reqHeaders = { 'User-Agent': 'Novelva-Updater', ...extraHeaders };
+    return new Promise((resolve, reject) => {
+      const req = https.get(url, { headers: reqHeaders, timeout: 15000 }, (res: any) => {
+        if (!followRedirect && res.statusCode >= 300 && res.statusCode < 400) {
+          resolve({ statusCode: res.statusCode, headers: res.headers, body: '' });
+          res.resume();
+          return;
+        }
+        if (followRedirect && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          resolve(httpsGet(res.headers.location, true, extraHeaders));
+          res.resume();
+          return;
+        }
+        let body = '';
+        res.on('data', (chunk: string) => { body += chunk; });
+        res.on('end', () => resolve({ statusCode: res.statusCode, headers: res.headers, body }));
+      });
+      req.on('error', reject);
+      req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+    });
+  }
+
+  async function checkViaHtml(): Promise<ReleaseInfo | null> {
+    try {
+      const pageUrl = `https://github.com/${GITHUB_REPO}/releases/latest`;
+
+      // Step 1: Don't follow redirect, just get Location header to extract tag
+      const redirectRes = await httpsGet(pageUrl, false);
+      const location = redirectRes.headers?.location || '';
+
+      const tagMatch = location.match(/\/releases\/tag\/([^/?#]+)/);
+      if (!tagMatch) {
+        return null;
+      }
+
+      const tag = tagMatch[1];
+      const latestVersion = tag.replace(/^v/, '');
+      const currentVersion = app.getVersion();
+
+      // Step 2: Fetch the release page to find .zip download link
+      const tagPageUrl = `https://github.com/${GITHUB_REPO}/releases/tag/${tag}`;
+      const pageRes = await httpsGet(tagPageUrl, true);
+
+      let zipUrl: string | null = null;
+      if (pageRes.statusCode === 200) {
+        const escapedTag = tag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const zipPattern = new RegExp(`/${GITHUB_REPO}/releases/download/${escapedTag}/[^"]*\\.zip`, 'i');
+        const zipMatch = pageRes.body.match(zipPattern);
+        zipUrl = zipMatch ? `https://github.com${zipMatch[0]}` : null;
+      }
 
       return {
         version: latestVersion,
-        name: data.name || `v${latestVersion}`,
-        body: data.body || '',
-        htmlUrl: data.html_url || `https://github.com/${GITHUB_REPO}/releases/latest`,
-        zipUrl: zipAsset?.browser_download_url || null,
-        publishedAt: data.published_at || '',
+        name: `v${latestVersion}`,
+        body: '',
+        htmlUrl: tagPageUrl,
+        zipUrl,
+        publishedAt: '',
         isNewer: compareVersions(currentVersion, latestVersion),
       };
     } catch (err) {
-      console.error('[update:check] error:', (err as Error).message);
+      console.error('[update:check:html] error:', (err as Error).message);
       return null;
+    }
+  }
+
+  // Check for updates: try multiple methods for maximum reliability
+  ipcMain.handle('update:check', async (): Promise<ReleaseInfo | null> => {
+    try {
+      // Method 1: Electron net.fetch (respects system proxy)
+      try {
+        const result = await checkViaNetFetch();
+        if (result) return result;
+      } catch (e) {
+        console.log('[update:check] net.fetch failed:', (e as Error).message);
+      }
+
+      // Method 2: Node.js https (different network stack)
+      try {
+        const result = await checkViaNodeHttps();
+        if (result) return result;
+      } catch (e) {
+        console.log('[update:check] node https failed:', (e as Error).message);
+      }
+
+      // Method 3: HTML redirect fallback (no API needed)
+      try {
+        const result = await checkViaHtml();
+        if (result) return result;
+      } catch (e) {
+        console.log('[update:check] html fallback failed:', (e as Error).message);
+      }
+
+      return {
+        version: '', name: '', body: '',
+        htmlUrl: `https://github.com/${GITHUB_REPO}/releases/latest`,
+        zipUrl: null, publishedAt: '', isNewer: false,
+        error: '无法获取更新信息，请检查网络连接后重试',
+      };
+    } catch (err) {
+      const msg = (err as Error).message || String(err);
+      console.error('[update:check] error:', msg);
+      return {
+        version: '', name: '', body: '',
+        htmlUrl: `https://github.com/${GITHUB_REPO}/releases/latest`,
+        zipUrl: null, publishedAt: '', isNewer: false,
+        error: `网络连接失败: ${msg}`,
+      };
     }
   });
 

@@ -13,6 +13,12 @@ if (started) {
   app.quit();
 }
 
+// Prevent multiple instances — fixes disk cache "Access is denied" errors
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+}
+
 const createWindow = () => {
   const mainWindow = new BrowserWindow({
     width: 1200,
