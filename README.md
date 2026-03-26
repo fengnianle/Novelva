@@ -21,11 +21,12 @@
 
 前往 [GitHub Releases](https://github.com/fengnianle/Novelva/releases/latest) 下载最新版本：
 
-1. ✅ 下载 `Novelva-Setup.exe`
-2. ✅ 双击运行安装程序
-3. ✅ 安装完成，桌面会出现 Novelva 快捷方式
+1. ✅ 下载 `Novelva.zip`
+2. ✅ 解压到任意目录
+3. ✅ 双击 `Novelva.exe` 启动
 
-> 💡 **提示**：应用内支持 **设置 → 检查更新** 自动获取最新版本
+> 💡 **后续更新**：应用内 **设置 → 检查更新 → 立即更新**，自动下载并覆盖安装，无需手动操作  
+> 📁 **数据位置**：`%APPDATA%\Novelva\reading-app.db`（所有用户数据本地存储，更新不会丢失）
 
 ### 第一次使用
 
@@ -196,18 +197,6 @@ src/
 - **位置**: `%APPDATA%/Novelva/reading-app.db`
 - **格式**: SQLite (sql.js WASM)
 - **内容**: 句子缓存、词汇本、阅读进度、设置等
-
----
-
-## 📋 更新日志
-
-### 发布新版本（维护者指南）
-
-1. **更新版本号**：修改 `package.json` 中的 `version`
-2. **打包**：运行 `npm run make`
-3. **创建 Tag**：`git tag v1.1.0 && git push origin main --tags`
-4. **发布 Release**：在 GitHub 上创建 Release，上传 `Novelva-Setup.exe`
-5. **验证**：用户可通过应用内 **设置 → 检查更新** 获取
 
 ---
 

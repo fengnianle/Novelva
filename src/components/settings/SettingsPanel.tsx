@@ -63,11 +63,18 @@ export const SettingsPanel: React.FC = () => {
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateResult, setUpdateResult] = useState<any>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
+  const [updateProgress, setUpdateProgress] = useState<{ stage: string; percent: number; detail?: string } | null>(null);
+  const [isUpdating, setIsUpdating] = useState(false);
 
   useEffect(() => {
     refreshTokenUsage();
     // Load current app version
     (window as any).electronAPI?.getAppVersion?.().then((v: string) => setAppVersion(v || ''));
+    // Listen for update progress
+    const cleanup = (window as any).electronAPI?.onUpdateProgress?.((data: any) => {
+      setUpdateProgress(data);
+    });
+    return () => cleanup?.();
   }, [refreshTokenUsage]);
 
   const handleCheckUpdate = async () => {
@@ -86,6 +93,27 @@ export const SettingsPanel: React.FC = () => {
       setUpdateError(`检查失败: ${(err as Error).message}`);
     }
     setUpdateChecking(false);
+  };
+
+  const handleAutoUpdate = async () => {
+    if (!updateResult?.zipUrl) return;
+    setIsUpdating(true);
+    setUpdateError(null);
+    setUpdateProgress({ stage: 'preparing', percent: 0, detail: '准备更新...' });
+    try {
+      const api = (window as any).electronAPI;
+      const result = await api?.downloadAndApply(updateResult.zipUrl);
+      if (result && !result.success) {
+        setUpdateError(result.error || '更新失败');
+        setIsUpdating(false);
+        setUpdateProgress(null);
+      }
+      // If success, app will quit and restart — no need to handle here
+    } catch (err) {
+      setUpdateError(`更新失败: ${(err as Error).message}`);
+      setIsUpdating(false);
+      setUpdateProgress(null);
+    }
   };
 
   return (
@@ -544,29 +572,47 @@ export const SettingsPanel: React.FC = () => {
             </SettingsRow>
 
             <div className="border-t border-border pt-4">
-              <button
-                onClick={handleCheckUpdate}
-                disabled={updateChecking}
-                className="w-full py-2.5 rounded-lg border border-border hover:border-primary/50 hover:bg-primary/5 transition-all text-sm text-muted-foreground hover:text-primary flex items-center justify-center gap-2 disabled:opacity-50"
-              >
-                {updateChecking ? (
-                  <><RefreshCw size={14} className="animate-spin" /> 正在检查...</>
-                ) : (
-                  <><Download size={14} /> 检查更新</>
-                )}
-              </button>
+              {/* Update progress bar */}
+              {isUpdating && updateProgress && (
+                <div className="mb-4 space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-primary font-medium">{updateProgress.detail || '更新中...'}</span>
+                    <span className="text-muted-foreground">{updateProgress.percent}%</span>
+                  </div>
+                  <div className="w-full h-2 bg-secondary rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-primary rounded-full transition-all duration-300"
+                      style={{ width: `${updateProgress.percent}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {!isUpdating && (
+                <button
+                  onClick={handleCheckUpdate}
+                  disabled={updateChecking}
+                  className="w-full py-2.5 rounded-lg border border-border hover:border-primary/50 hover:bg-primary/5 transition-all text-sm text-muted-foreground hover:text-primary flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {updateChecking ? (
+                    <><RefreshCw size={14} className="animate-spin" /> 正在检查...</>
+                  ) : (
+                    <><Download size={14} /> 检查更新</>
+                  )}
+                </button>
+              )}
 
               {updateError && (
                 <div className="mt-3 text-xs text-destructive">{updateError}</div>
               )}
 
-              {updateResult && !updateResult.isNewer && (
+              {updateResult && !updateResult.isNewer && !isUpdating && (
                 <div className="mt-3 text-xs text-green-600 dark:text-green-400 flex items-center gap-1.5">
                   ✓ 已是最新版本 (v{updateResult.version})
                 </div>
               )}
 
-              {updateResult && updateResult.isNewer && (
+              {updateResult && updateResult.isNewer && !isUpdating && (
                 <div className="mt-3 space-y-3 bg-primary/5 border border-primary/20 rounded-lg p-4">
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-semibold text-primary">
@@ -582,13 +628,21 @@ export const SettingsPanel: React.FC = () => {
                     </div>
                   )}
                   <div className="flex items-center gap-2">
-                    {updateResult.downloadUrl && (
+                    {updateResult.zipUrl ? (
                       <button
-                        onClick={() => (window as any).electronAPI?.downloadUpdate(updateResult.downloadUrl)}
+                        onClick={handleAutoUpdate}
                         className="flex-1 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors flex items-center justify-center gap-2"
                       >
                         <Download size={14} />
-                        下载更新
+                        立即更新
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => (window as any).electronAPI?.openReleasePage(updateResult.htmlUrl)}
+                        className="flex-1 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors flex items-center justify-center gap-2"
+                      >
+                        <ExternalLink size={14} />
+                        前往下载
                       </button>
                     )}
                     <button

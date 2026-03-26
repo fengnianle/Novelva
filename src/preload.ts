@@ -33,5 +33,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   checkForUpdate: () => ipcRenderer.invoke('update:check'),
   getAppVersion: () => ipcRenderer.invoke('update:get-version'),
   openReleasePage: (url: string) => ipcRenderer.invoke('update:open-release', url),
-  downloadUpdate: (url: string) => ipcRenderer.invoke('update:download', url),
+  downloadAndApply: (zipUrl: string) => ipcRenderer.invoke('update:download-and-apply', zipUrl),
+  onUpdateProgress: (cb: (data: { stage: string; percent: number; detail?: string }) => void) => {
+    const handler = (_event: any, data: any) => cb(data);
+    ipcRenderer.on('update:progress', handler);
+    return () => ipcRenderer.removeListener('update:progress', handler);
+  },
 });
