@@ -532,29 +532,132 @@ namespace NovelvaInstaller
 
         // ── Fetch release ──────────────────────────────────────────
 
+        // Try GitHub API first; on 403 (rate limit) fall back to HTML scraping
         private void FetchReleaseInfo()
         {
+            statusLabel.Text = "正在获取最新版本信息...";
+            detailLabel.Text = "";
             var bgw = new BackgroundWorker();
             bgw.DoWork += (s, e) =>
             {
                 ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
-                var url = "https://api.github.com/repos/" + GITHUB_REPO + "/releases/latest";
-                var req = (HttpWebRequest)WebRequest.Create(url);
-                req.UserAgent = "Novelva-Installer";
-                req.Accept = "application/json";
-                using (var res = req.GetResponse())
-                using (var stream = res.GetResponseStream())
+
+                // ── Method 1: GitHub API ──
+                try
                 {
-                    var ser = new DataContractJsonSerializer(typeof(ReleaseInfo));
-                    e.Result = (ReleaseInfo)ser.ReadObject(stream);
+                    var url = "https://api.github.com/repos/" + GITHUB_REPO + "/releases/latest";
+                    var req = (HttpWebRequest)WebRequest.Create(url);
+                    req.UserAgent = "Novelva-Installer/1.0";
+                    req.Accept = "application/json";
+                    req.Timeout = 15000;
+                    using (var res = req.GetResponse())
+                    using (var stream = res.GetResponseStream())
+                    {
+                        var ser = new DataContractJsonSerializer(typeof(ReleaseInfo));
+                        e.Result = (ReleaseInfo)ser.ReadObject(stream);
+                        return;
+                    }
                 }
+                catch (WebException wex)
+                {
+                    var httpRes = wex.Response as HttpWebResponse;
+                    if (httpRes == null || httpRes.StatusCode != HttpStatusCode.Forbidden)
+                        throw; // not a rate-limit, rethrow
+                }
+
+                // ── Method 2: Get tag from releases/latest redirect, construct URL ──
+                // GitHub loads asset links via JS, so we can't scrape them.
+                // But the releases/latest page HTML contains the tag name,
+                // and the ZIP naming pattern is predictable.
+                var pageUrl = "https://github.com/" + GITHUB_REPO + "/releases/latest";
+                var pageReq = (HttpWebRequest)WebRequest.Create(pageUrl);
+                pageReq.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
+                pageReq.Timeout = 15000;
+                pageReq.AllowAutoRedirect = true;
+                string html;
+                string finalUrl;
+                using (var res = pageReq.GetResponse())
+                {
+                    finalUrl = res.ResponseUri.ToString();
+                    using (var reader = new StreamReader(res.GetResponseStream(), Encoding.UTF8))
+                    {
+                        html = reader.ReadToEnd();
+                    }
+                }
+
+                // Extract tag from redirected URL: .../releases/tag/v1.0.1
+                string tagName = null;
+                string tagMarker = "/releases/tag/";
+                int tagIdx = finalUrl.IndexOf(tagMarker);
+                if (tagIdx >= 0)
+                {
+                    tagName = finalUrl.Substring(tagIdx + tagMarker.Length).Trim('/');
+                }
+                if (string.IsNullOrEmpty(tagName))
+                {
+                    // Fallback: search in HTML
+                    int htmlTagIdx = html.IndexOf("/" + GITHUB_REPO + "/releases/tag/");
+                    if (htmlTagIdx >= 0)
+                    {
+                        int start = htmlTagIdx + ("/" + GITHUB_REPO + "/releases/tag/").Length;
+                        int end = html.IndexOf('"', start);
+                        if (end < 0) end = html.IndexOf('<', start);
+                        if (end > start) tagName = html.Substring(start, end - start);
+                    }
+                }
+
+                if (string.IsNullOrEmpty(tagName))
+                    throw new Exception("无法获取最新版本号");
+
+                // Construct download URL from known naming pattern
+                string assetName = APP_NAME + "-" + tagName + "-win32-x64.zip";
+                string downloadUrl = "https://github.com/" + GITHUB_REPO + "/releases/download/" + tagName + "/" + assetName;
+
+                // Verify the URL is valid with a HEAD request
+                try
+                {
+                    var headReq = (HttpWebRequest)WebRequest.Create(downloadUrl);
+                    headReq.Method = "HEAD";
+                    headReq.UserAgent = "Novelva-Installer/1.0";
+                    headReq.Timeout = 10000;
+                    headReq.AllowAutoRedirect = true;
+                    using (var headRes = headReq.GetResponse()) { }
+                }
+                catch
+                {
+                    throw new Exception("安装包不存在: " + assetName);
+                }
+
+                var info = new ReleaseInfo();
+                info.TagName = tagName;
+                info.Name = tagName;
+                info.Assets = new AssetInfo[1];
+                info.Assets[0] = new AssetInfo();
+                info.Assets[0].Name = assetName;
+                info.Assets[0].DownloadUrl = downloadUrl;
+                info.Assets[0].Size = 0;
+                e.Result = info;
             };
             bgw.RunWorkerCompleted += (s, e) =>
             {
                 if (e.Error != null)
                 {
                     statusLabel.Text = "❌ 无法获取版本信息";
-                    detailLabel.Text = "请检查网络连接: " + e.Error.Message;
+                    detailLabel.Text = e.Error.Message;
+                    // Show retry option
+                    installButton.Text = "重试";
+                    installButton.Enabled = true;
+                    installButton.Click -= InstallButton_Click;
+                    EventHandler retryHandler = null;
+                    retryHandler = (s2, e2) =>
+                    {
+                        installButton.Click -= retryHandler;
+                        installButton.Click += InstallButton_Click;
+                        installButton.Text = "安装";
+                        installButton.Enabled = false;
+                        FetchReleaseInfo();
+                    };
+                    installButton.Click += retryHandler;
                     return;
                 }
                 releaseInfo = (ReleaseInfo)e.Result;
@@ -576,9 +679,11 @@ namespace NovelvaInstaller
                     return;
                 }
                 var version = releaseInfo.TagName ?? releaseInfo.Name ?? "";
-                var sizeMb = (zipAsset.Size / 1024.0 / 1024.0).ToString("F1");
+                string sizeText = "";
+                if (zipAsset.Size > 0)
+                    sizeText = " (" + (zipAsset.Size / 1024.0 / 1024.0).ToString("F1") + " MB)";
                 statusLabel.Text = "准备安装 " + APP_NAME + " " + version;
-                detailLabel.Text = zipAsset.Name + " (" + sizeMb + " MB)";
+                detailLabel.Text = zipAsset.Name + sizeText;
                 pathPanel.Visible = true;
                 installButton.Enabled = true;
             };
