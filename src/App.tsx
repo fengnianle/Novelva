@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useSettingsStore } from './stores/settings-store';
 import { useReaderStore } from './stores/reader-store';
 import { Sidebar } from './components/layout/Sidebar';
@@ -10,9 +10,11 @@ import { SettingsPanel } from './components/settings/SettingsPanel';
 const App: React.FC = () => {
   const { loadSettings } = useSettingsStore();
   const viewMode = useReaderStore((s) => s.viewMode);
+  const [appVersion, setAppVersion] = useState('');
 
   useEffect(() => {
     loadSettings();
+    (window as any).electronAPI?.getAppVersion?.().then((v: string) => setAppVersion(v || ''));
   }, [loadSettings]);
 
   return (
@@ -23,7 +25,7 @@ const App: React.FC = () => {
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
       >
         <span className="text-xs text-muted-foreground/60 select-none">
-          Novelva <span className="text-[10px]">v1.0.0</span>
+          Novelva {appVersion && <span className="text-[10px]">v{appVersion}</span>}
         </span>
       </div>
       <div className="flex flex-1 min-h-0">

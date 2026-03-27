@@ -92,3 +92,6 @@ typings/
 out/
 out2/
 dist/
+
+# Installer build
+installer/build/
