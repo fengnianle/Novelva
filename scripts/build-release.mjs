@@ -14,7 +14,7 @@ try {
   execSync('npm run package-release', { stdio: 'inherit' });
   
   console.log('\n✅ 构建完成!');
-  console.log('📁 发布包位置: out/release/');
+  console.log('📁 发布包位置: dist/release/');
   console.log('📤 可直接上传到 GitHub Release');
   
 } catch (error) {

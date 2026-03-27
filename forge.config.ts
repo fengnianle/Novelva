@@ -10,7 +10,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 
 const config: ForgeConfig = {
-  outDir: path.resolve(__dirname, 'out2'),
+  outDir: path.resolve(__dirname, 'dist'),
   packagerConfig: {
     asar: true,
     name: 'Novelva',
@@ -19,19 +19,25 @@ const config: ForgeConfig = {
   },
   hooks: {
     postPackage: async (_config, result) => {
-      // Copy runtime-required node_modules into resources/modules/
-      // These are loaded via createRequire at runtime and not bundled by Vite
+      // Copy runtime-required node_modules into resources/modules/node_modules/
+      // so createRequire(resources/modules/package.json) can resolve them
       const outputPath = result.outputPaths[0];
-      const modulesDir = path.join(outputPath, 'resources', 'modules');
-      const modulesToCopy = ['sql.js', 'adm-zip', 'pdf-parse'];
+      const modulesBase = path.join(outputPath, 'resources', 'modules');
+      const nodeModulesDir = path.join(modulesBase, 'node_modules');
+      const modulesToCopy = ['sql.js', 'adm-zip', 'pdf-parse', 'node-ensure'];
       for (const mod of modulesToCopy) {
         const src = path.resolve(__dirname, 'node_modules', mod);
-        const dest = path.join(modulesDir, mod);
+        const dest = path.join(nodeModulesDir, mod);
         if (fs.existsSync(src)) {
           fs.cpSync(src, dest, { recursive: true });
-          console.log(`  ✔ Copied ${mod} to resources/modules/`);
+          console.log(`  ✔ Copied ${mod} to resources/modules/node_modules/`);
         }
       }
+      // Create a minimal package.json so createRequire can resolve from here
+      fs.writeFileSync(
+        path.join(modulesBase, 'package.json'),
+        JSON.stringify({ name: 'novelva-modules', private: true }),
+      );
     },
   },
   rebuildConfig: {},

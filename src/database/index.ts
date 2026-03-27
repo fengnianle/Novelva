@@ -11,9 +11,10 @@ function getSqlJs() {
     const appRequire = createRequire(path.join(app.getAppPath(), 'package.json'));
     return appRequire('sql.js/dist/sql-wasm.js');
   } catch {
-    // In production, modules are copied to resources/modules/ by postPackage hook
-    const modulesPath = path.join(path.dirname(app.getPath('exe')), 'resources', 'modules');
-    return require(path.join(modulesPath, 'sql.js', 'dist', 'sql-wasm.js'));
+    // In production, modules are in resources/modules/node_modules/
+    const pkgPath = path.join(path.dirname(app.getPath('exe')), 'resources', 'modules', 'package.json');
+    const prodRequire = createRequire(pkgPath);
+    return prodRequire('sql.js/dist/sql-wasm.js');
   }
 }
 
@@ -33,11 +34,12 @@ function getWasmPath(): string {
   );
   if (fs.existsSync(devPath)) return devPath;
 
-  // In production, postPackage hook copies modules to resources/modules/
+  // In production, postPackage hook copies modules to resources/modules/node_modules/
   const prodPath = path.join(
     path.dirname(app.getPath('exe')),
     'resources',
     'modules',
+    'node_modules',
     'sql.js',
     'dist',
     'sql-wasm.wasm'

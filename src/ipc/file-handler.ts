@@ -8,8 +8,9 @@ function getAdmZip() {
     const appRequire = createRequire(path.join(app.getAppPath(), 'package.json'));
     return appRequire('adm-zip');
   } catch {
-    const modulesPath = path.join(path.dirname(app.getPath('exe')), 'resources', 'modules');
-    return require(path.join(modulesPath, 'adm-zip'));
+    const pkgPath = path.join(path.dirname(app.getPath('exe')), 'resources', 'modules', 'package.json');
+    const prodRequire = createRequire(pkgPath);
+    return prodRequire('adm-zip');
   }
 }
 
@@ -136,8 +137,9 @@ export function registerFileHandlers(): void {
         const appRequire = createRequire(path.join(app.getAppPath(), 'package.json'));
         pdfParse = appRequire('pdf-parse');
       } catch {
-        const modulesPath = path.join(path.dirname(app.getPath('exe')), 'resources', 'modules');
-        pdfParse = require(path.join(modulesPath, 'pdf-parse'));
+        const pkgPath = path.join(path.dirname(app.getPath('exe')), 'resources', 'modules', 'package.json');
+        const prodRequire = createRequire(pkgPath);
+        pdfParse = prodRequire('pdf-parse');
       }
       const dataBuffer = fs.readFileSync(filePath);
       const result = await pdfParse(dataBuffer);
