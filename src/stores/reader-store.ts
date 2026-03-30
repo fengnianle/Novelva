@@ -17,6 +17,17 @@ export interface RecentBook {
   readingProgress: number;
 }
 
+export interface ReviewSnapshot {
+  queue: any[];
+  currentIdx: number;
+  showAnswer: boolean;
+  reviewed: number;
+  remembered: number;
+  sessionComplete: boolean;
+  filterLang: string;
+  filterSource: string;
+}
+
 export interface ReaderState {
   currentBook: BookInfo | null;
   viewMode: ViewMode;
@@ -26,6 +37,8 @@ export interface ReaderState {
   fileLoading: boolean;
   fileLoadingMessage: string;
   readingProgress: number;
+  reviewDetailWord: string | null;
+  reviewSnapshot: ReviewSnapshot | null;
 
   setCurrentBook: (book: BookInfo | null) => void;
   setViewMode: (mode: ViewMode) => void;
@@ -37,6 +50,8 @@ export interface ReaderState {
   saveScrollPosition: (filePath: string, progress: number) => Promise<void>;
   getScrollPosition: (filePath: string) => Promise<number>;
   setReadingProgress: (progress: number) => void;
+  openWordDetailFromReview: (word: string, snapshot: ReviewSnapshot) => void;
+  returnToReview: () => void;
 }
 
 export const useReaderStore = create<ReaderState>((set) => ({
@@ -48,9 +63,13 @@ export const useReaderStore = create<ReaderState>((set) => ({
   fileLoading: false,
   fileLoadingMessage: '',
   readingProgress: 0,
+  reviewDetailWord: null,
+  reviewSnapshot: null,
 
   setCurrentBook: (book) => set({ currentBook: book }),
   setViewMode: (mode) => set({ viewMode: mode, selectedSentenceId: null, selectedWord: null }),
+  openWordDetailFromReview: (word, snapshot) => set({ viewMode: 'vocabulary', reviewDetailWord: word, reviewSnapshot: snapshot }),
+  returnToReview: () => set({ viewMode: 'review', reviewDetailWord: null }),
   setSelectedSentenceId: (id) => set({ selectedSentenceId: id, selectedWord: null }),
   setSelectedWord: (word) => set({ selectedWord: word }),
   setFileLoading: (loading, message = '') => set({ fileLoading: loading, fileLoadingMessage: message }),

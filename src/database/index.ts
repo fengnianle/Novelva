@@ -49,8 +49,9 @@ function getWasmPath(): string {
   return '';
 }
 
-export async function initDatabase(): Promise<any> {
-  if (db) return db;
+export async function initDatabase(force?: boolean): Promise<any> {
+  if (db && !force) return db;
+  if (force && db) { try { db.close(); } catch (_) {} db = null; }
 
   const wasmPath = getWasmPath();
   const initOptions: any = {};
@@ -156,9 +157,23 @@ function createTables(database: any): void {
   `);
 }
 
+// Check if a column exists in a table
+function columnExists(database: any, table: string, column: string): boolean {
+  try {
+    const info = database.exec(`PRAGMA table_info(${table})`);
+    if (info.length > 0) {
+      const nameIdx = info[0].columns.indexOf('name');
+      return info[0].values.some((row: any[]) => row[nameIdx] === column);
+    }
+  } catch (_) { /* ignore */ }
+  return false;
+}
+
 // Add columns introduced after initial schema — safe to run repeatedly
+// Uses column existence check for cleaner behavior with imported DBs
 function migrateSchema(database: any): void {
   const addColumn = (table: string, column: string, type: string) => {
+    if (columnExists(database, table, column)) return;
     try {
       database.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
     } catch (_) { /* column already exists — ignore */ }
@@ -169,6 +184,14 @@ function migrateSchema(database: any): void {
   addColumn('sentence_cache', 'language', "TEXT DEFAULT 'en'");
   addColumn('sentence_cache', 'grammar_points', "TEXT DEFAULT '[]'");
   addColumn('reading_progress', 'language', "TEXT DEFAULT 'en'");
+
+  // Store schema version so older app versions can detect newer DB format
+  // Old apps simply ignore unknown keys in the settings table
+  try {
+    database.run(
+      "INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '2')"
+    );
+  } catch (_) { /* ignore */ }
 }
 
 export function saveDatabase(): void {

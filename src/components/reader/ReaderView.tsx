@@ -1,9 +1,9 @@
-import React, { useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useCallback, useState, useMemo } from 'react';
 import { useReaderStore } from '../../stores/reader-store';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useFileImport } from '../../hooks/use-file-import';
-import { Paragraph, resetSharedObserver } from './Paragraph';
-import { FolderOpen, BookOpen, Loader2, ArrowLeft } from 'lucide-react';
+import { resetSharedObserver, VirtualizedParagraphs } from './Paragraph';
+import { FolderOpen, BookOpen, Loader2, ArrowLeft, Bookmark } from 'lucide-react';
 import { SelectionAskButton } from '../ai/SelectionAskButton';
 
 function getScrollPercent(el: HTMLDivElement): number {
@@ -15,16 +15,48 @@ function setScrollFromPercent(el: HTMLDivElement, pct: number) {
   el.scrollTop = (pct / 100) * (el.scrollHeight - el.clientHeight);
 }
 
-// Separate component for the reading content to isolate re-renders
-const ReaderContent = React.memo<{ paragraphs: import('../../lib/sentence-splitter').ParagraphData[] }>(
-  ({ paragraphs }) => (
-    <div className="max-w-3xl mx-auto">
-      {paragraphs.map((paragraph) => (
-        <Paragraph key={paragraph.id} paragraph={paragraph} />
-      ))}
+// ── Context Menu component ──
+interface ContextMenuProps {
+  x: number;
+  y: number;
+  sentenceId: string;
+  isBookmarked: boolean;
+  onBookmark: () => void;
+  onClose: () => void;
+}
+
+const SentenceContextMenu: React.FC<ContextMenuProps> = ({ x, y, isBookmarked, onBookmark, onClose }) => {
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [onClose]);
+
+  // Adjust position to stay within viewport
+  let top = y, left = x;
+  if (left + 160 > window.innerWidth) left = window.innerWidth - 170;
+  if (top + 40 > window.innerHeight) top = y - 40;
+
+  return (
+    <div
+      ref={menuRef}
+      className="fixed z-[80] bg-popover border border-border rounded-lg shadow-xl py-1 min-w-[140px] animate-in fade-in-0 zoom-in-95 duration-100"
+      style={{ top, left }}
+    >
+      <button
+        onClick={() => { onBookmark(); onClose(); }}
+        className="w-full text-left px-3 py-2 text-sm hover:bg-accent transition-colors flex items-center gap-2"
+      >
+        <Bookmark size={14} className={isBookmarked ? 'fill-yellow-400 text-yellow-500' : ''} />
+        {isBookmarked ? '取消书签' : '添加书签'}
+      </button>
     </div>
-  )
-);
+  );
+};
 
 export const ReaderView: React.FC = () => {
   const currentBook = useReaderStore((s) => s.currentBook);
@@ -36,6 +68,8 @@ export const ReaderView: React.FC = () => {
   const getScrollPosition = useReaderStore((s) => s.getScrollPosition);
   const fontSize = useSettingsStore((s) => s.fontSize);
   const lineHeight = useSettingsStore((s) => s.lineHeight);
+  const readerFontColor = useSettingsStore((s) => s.readerFontColor);
+  const readerBgColor = useSettingsStore((s) => s.readerBgColor);
   const { importFile, openRecentBook } = useFileImport();
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -43,20 +77,83 @@ export const ReaderView: React.FC = () => {
   const hasRestoredScroll = useRef(false);
   const currentProgressRef = useRef(0);
   const rafRef = useRef<number>(0);
-  // Direct DOM refs for progress display (avoid Zustand re-renders on scroll)
   const progressTextRef = useRef<HTMLSpanElement>(null);
   const progressBarRef = useRef<HTMLDivElement>(null);
+
+  // Bookmark state: one bookmark per file
+  const [bookmarkSentenceId, setBookmarkSentenceId] = useState<string | null>(null);
+
+  // Context menu state
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; sentenceId: string } | null>(null);
+
+  // Collected sentences & vocab words for hints (Feature 5)
+  const [collectedSentences, setCollectedSentences] = useState<Set<string>>(new Set());
+  const [vocabWords, setVocabWords] = useState<Set<string>>(new Set());
 
   // Load recent books on mount
   useEffect(() => {
     loadRecentBooks();
   }, [loadRecentBooks]);
 
+  // Load bookmark, collected sentences, vocab words when book changes
+  useEffect(() => {
+    if (!currentBook) return;
+    const api = (window as any).electronAPI;
+    if (!api) return;
+
+    // Load bookmark for this file
+    api.dbQuery(
+      'SELECT value FROM settings WHERE key = ?',
+      ['bookmark_' + currentBook.filePath]
+    ).then((rows: any[]) => {
+      setBookmarkSentenceId(rows && rows.length > 0 ? rows[0].value : null);
+    }).catch(() => {});
+
+    // Load collected sentences (sentences that exist in vocabulary table)
+    api.dbQuery('SELECT DISTINCT sentence FROM vocabulary').then((rows: any[]) => {
+      const set = new Set<string>();
+      if (rows) for (const r of rows) set.add(r.sentence);
+      setCollectedSentences(set);
+    }).catch(() => {});
+
+    // Load vocab words
+    api.dbQuery('SELECT DISTINCT LOWER(word) as w FROM vocabulary').then((rows: any[]) => {
+      const set = new Set<string>();
+      if (rows) for (const r of rows) set.add(r.w);
+      setVocabWords(set);
+    }).catch(() => {});
+  }, [currentBook?.filePath]);
+
+  // Handle bookmark toggle
+  const handleBookmark = useCallback((sentenceId: string) => {
+    if (!currentBook) return;
+    const api = (window as any).electronAPI;
+    if (!api) return;
+    const key = 'bookmark_' + currentBook.filePath;
+    if (bookmarkSentenceId === sentenceId) {
+      // Remove bookmark
+      api.dbRun('DELETE FROM settings WHERE key = ?', [key]);
+      setBookmarkSentenceId(null);
+    } else {
+      // Set bookmark (replaces any existing)
+      api.dbRun(
+        'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?',
+        [key, sentenceId, sentenceId]
+      );
+      setBookmarkSentenceId(sentenceId);
+    }
+  }, [currentBook, bookmarkSentenceId]);
+
+  // Context menu handler
+  const handleContextMenu = useCallback((e: React.MouseEvent, sentenceId: string) => {
+    setCtxMenu({ x: e.clientX, y: e.clientY, sentenceId });
+  }, []);
+
   // Reset observer & restore scroll position when book changes
   useEffect(() => {
     if (!currentBook || !scrollRef.current) return;
     hasRestoredScroll.current = false;
-    resetSharedObserver(); // Free stale observer entries from previous book
+    resetSharedObserver();
 
     const restore = async () => {
       const pct = await getScrollPosition(currentBook.filePath);
@@ -64,7 +161,6 @@ export const ReaderView: React.FC = () => {
         setScrollFromPercent(scrollRef.current, pct);
       }
       currentProgressRef.current = pct;
-      // Update DOM directly
       if (progressTextRef.current) progressTextRef.current.textContent = `${Math.round(pct)}%`;
       if (progressBarRef.current) progressBarRef.current.style.width = `${Math.min(pct, 100)}%`;
       hasRestoredScroll.current = true;
@@ -73,7 +169,7 @@ export const ReaderView: React.FC = () => {
     return () => clearTimeout(timer);
   }, [currentBook?.filePath, getScrollPosition]);
 
-  // Save on window close / navigate away
+  // Save on window close
   useEffect(() => {
     const handleBeforeUnload = () => {
       if (currentBook && currentProgressRef.current > 0) {
@@ -88,20 +184,12 @@ export const ReaderView: React.FC = () => {
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [currentBook]);
 
-  // Cancel pending timers when app goes to background to prevent freeze
+  // Cancel pending timers when app goes to background
   useEffect(() => {
     const handleVisibility = () => {
       if (document.hidden) {
-        // App went to background — cancel any pending work
-        if (scrollTimerRef.current) {
-          clearTimeout(scrollTimerRef.current);
-          scrollTimerRef.current = null;
-        }
-        if (rafRef.current) {
-          cancelAnimationFrame(rafRef.current);
-          rafRef.current = 0;
-        }
-        // Save current progress immediately before going to background
+        if (scrollTimerRef.current) { clearTimeout(scrollTimerRef.current); scrollTimerRef.current = null; }
+        if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = 0; }
         if (currentBook && currentProgressRef.current > 0) {
           saveScrollPosition(currentBook.filePath, currentProgressRef.current);
         }
@@ -111,7 +199,7 @@ export const ReaderView: React.FC = () => {
     return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, [currentBook, saveScrollPosition]);
 
-  // RAF-throttled scroll handler — updates DOM directly, no React state changes
+  // RAF-throttled scroll handler
   const handleScroll = useCallback(() => {
     if (!currentBook || !scrollRef.current || !hasRestoredScroll.current) return;
 
@@ -121,11 +209,9 @@ export const ReaderView: React.FC = () => {
       const pct = getScrollPercent(scrollRef.current);
       currentProgressRef.current = pct;
 
-      // Update progress display via direct DOM manipulation (zero re-renders)
       if (progressTextRef.current) progressTextRef.current.textContent = `${Math.round(pct)}%`;
       if (progressBarRef.current) progressBarRef.current.style.width = `${Math.min(pct, 100)}%`;
 
-      // Debounced DB save
       if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
       scrollTimerRef.current = setTimeout(() => {
         if (currentBook) {
@@ -145,7 +231,7 @@ export const ReaderView: React.FC = () => {
     );
   }
 
-  // Empty state: show bookshelf + open button
+  // Empty state
   if (!currentBook) {
     return (
       <div className="flex flex-col items-center justify-center h-full gap-6 px-8">
@@ -201,6 +287,14 @@ export const ReaderView: React.FC = () => {
     );
   }
 
+  // Reader custom colors
+  const readerStyle: React.CSSProperties = {
+    fontSize: `${fontSize}px`,
+    lineHeight: lineHeight,
+  };
+  if (readerFontColor) readerStyle.color = readerFontColor;
+  if (readerBgColor) readerStyle.backgroundColor = readerBgColor;
+
   return (
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-6 py-2.5 pr-[150px] border-b border-border bg-background/80 backdrop-blur-sm">
@@ -215,6 +309,11 @@ export const ReaderView: React.FC = () => {
           <h1 className="text-sm font-medium truncate text-muted-foreground">
             {currentBook.fileName}
           </h1>
+          {bookmarkSentenceId && (
+            <span className="text-xs text-yellow-500 flex items-center gap-0.5" title="已设置书签">
+              <Bookmark size={12} className="fill-yellow-400" />
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-3">
           <span ref={progressTextRef} className="text-xs text-muted-foreground tabular-nums">
@@ -239,11 +338,28 @@ export const ReaderView: React.FC = () => {
         ref={scrollRef}
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto px-8 py-6 md:px-16 lg:px-24"
-        style={{ fontSize: `${fontSize}px`, lineHeight: lineHeight }}
+        style={readerStyle}
       >
-        <ReaderContent paragraphs={currentBook.paragraphs} />
+        <VirtualizedParagraphs
+          paragraphs={currentBook.paragraphs}
+          fontSize={fontSize}
+          collectedSentences={collectedSentences}
+          vocabWords={vocabWords}
+          bookmarkSentenceId={bookmarkSentenceId}
+          onContextMenu={handleContextMenu}
+        />
       </div>
       <SelectionAskButton containerRef={scrollRef} />
+      {ctxMenu && (
+        <SentenceContextMenu
+          x={ctxMenu.x}
+          y={ctxMenu.y}
+          sentenceId={ctxMenu.sentenceId}
+          isBookmarked={bookmarkSentenceId === ctxMenu.sentenceId}
+          onBookmark={() => handleBookmark(ctxMenu.sentenceId)}
+          onClose={() => setCtxMenu(null)}
+        />
+      )}
     </div>
   );
 };

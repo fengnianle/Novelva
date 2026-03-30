@@ -32,11 +32,13 @@ export const SettingsPanel: React.FC = () => {
     darkMode, fontSize, lineHeight, apiKey,
     aiProvider, aiModel, customBaseUrl, customModel,
     tokenUsage, systemInstruction, sentenceInstruction, dailyReviewCount,
+    readerFontColor, readerBgColor,
     dictionaryApis, setDictionaryApis,
     vocabAnalysisPrompts, setVocabAnalysisPrompts,
     setDarkMode, setFontSize, setLineHeight, setApiKey,
     setAiProvider, setAiModel, setCustomBaseUrl, setCustomModel,
     setSystemInstruction, setSentenceInstruction, setDailyReviewCount,
+    setReaderFontColor, setReaderBgColor,
     resetPrompts, refreshTokenUsage, resetTokenUsage,
   } = useSettingsStore();
 
@@ -178,6 +180,61 @@ export const SettingsPanel: React.FC = () => {
               />
               <div className="flex justify-between text-[10px] text-muted-foreground">
                 <span>紧凑 1.2</span><span>宽松 2.5</span>
+              </div>
+            </div>
+
+            <div className="border-t border-border pt-4 space-y-3">
+              <div className="text-xs font-medium text-muted-foreground">阅读区域颜色</div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm">字体颜色</span>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={readerFontColor || (darkMode ? '#c5c8ce' : '#1a1a2e')}
+                    onChange={(e) => setReaderFontColor(e.target.value)}
+                    className="w-7 h-7 rounded border border-input cursor-pointer bg-transparent"
+                  />
+                  {readerFontColor && (
+                    <button onClick={() => setReaderFontColor('')} className="text-[10px] text-muted-foreground hover:text-foreground">重置</button>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm">背景颜色</span>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={readerBgColor || (darkMode ? '#1a1a2e' : '#faf8f5')}
+                    onChange={(e) => setReaderBgColor(e.target.value)}
+                    className="w-7 h-7 rounded border border-input cursor-pointer bg-transparent"
+                  />
+                  {readerBgColor && (
+                    <button onClick={() => setReaderBgColor('')} className="text-[10px] text-muted-foreground hover:text-foreground">重置</button>
+                  )}
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {[
+                  { label: '护眼绿', font: '#3b4a3a', bg: '#c8e6c0' },
+                  { label: '暖纸', font: '#3d3229', bg: '#f5edd6' },
+                  { label: '夜间护眼', font: '#b8c4b8', bg: '#1c2620' },
+                  { label: '深蓝夜', font: '#c5c8ce', bg: '#1a1a2e' },
+                ].map((preset) => (
+                  <button
+                    key={preset.label}
+                    onClick={() => { setReaderFontColor(preset.font); setReaderBgColor(preset.bg); }}
+                    className="text-[10px] px-2 py-1 rounded-md border border-border hover:border-primary/50 transition-colors"
+                    style={{ color: preset.font, backgroundColor: preset.bg }}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
+                <button
+                  onClick={() => { setReaderFontColor(''); setReaderBgColor(''); }}
+                  className="text-[10px] px-2 py-1 rounded-md border border-border hover:border-primary/50 transition-colors text-muted-foreground"
+                >
+                  默认
+                </button>
               </div>
             </div>
           </SettingsCard>
@@ -556,6 +613,50 @@ export const SettingsPanel: React.FC = () => {
                 </button>
               </div>
             )}
+          </SettingsCard>
+
+          {/* Data Management */}
+          <SettingsCard>
+            <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">数据管理</div>
+            <div className="space-y-3">
+              <div className="text-xs text-muted-foreground">导出/导入数据库文件，可用于备份或迁移数据（词汇本、阅读进度、设置等）</div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={async () => {
+                    const api = (window as any).electronAPI;
+                    if (!api) return;
+                    const result = await api.dbExport();
+                    if (result?.success) {
+                      alert('数据库已导出到：' + result.path);
+                    } else if (result?.error !== 'cancelled') {
+                      alert('导出失败：' + (result?.error || '未知错误'));
+                    }
+                  }}
+                  className="flex-1 py-2 rounded-lg border border-border hover:border-primary/50 hover:bg-primary/5 transition-all text-sm text-muted-foreground hover:text-primary flex items-center justify-center gap-2"
+                >
+                  <Download size={14} />
+                  导出数据库
+                </button>
+                <button
+                  onClick={async () => {
+                    const api = (window as any).electronAPI;
+                    if (!api) return;
+                    if (!confirm('导入将覆盖当前所有数据（当前数据库会自动备份为 .bak 文件）。确定继续吗？')) return;
+                    const result = await api.dbImport();
+                    if (result?.success) {
+                      alert('数据库已导入成功！应用将重新加载。');
+                      window.location.reload();
+                    } else if (result?.error !== 'cancelled') {
+                      alert('导入失败：' + (result?.error || '未知错误'));
+                    }
+                  }}
+                  className="flex-1 py-2 rounded-lg border border-border hover:border-orange-500/50 hover:bg-orange-500/5 transition-all text-sm text-muted-foreground hover:text-orange-600 flex items-center justify-center gap-2"
+                >
+                  <Download size={14} className="rotate-180" />
+                  导入数据库
+                </button>
+              </div>
+            </div>
           </SettingsCard>
 
           {/* About & Update */}

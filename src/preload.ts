@@ -31,6 +31,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getSettings: () => ipcRenderer.invoke('db:get-settings'),
   saveSetting: (key: string, value: string) => ipcRenderer.invoke('db:save-setting', key, value),
   checkForUpdate: () => ipcRenderer.invoke('update:check'),
+  dbExport: () => ipcRenderer.invoke('db:export'),
+  dbImport: () => ipcRenderer.invoke('db:import'),
   getAppVersion: () => ipcRenderer.invoke('update:get-version'),
   openReleasePage: (url: string) => ipcRenderer.invoke('update:open-release', url),
   downloadAndApply: (zipUrl: string) => ipcRenderer.invoke('update:download-and-apply', zipUrl),

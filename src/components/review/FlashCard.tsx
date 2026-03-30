@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { useVocabulary, VocabularyRow } from '../../hooks/use-vocabulary';
 import { useSettingsStore } from '../../stores/settings-store';
 import { useReaderStore } from '../../stores/reader-store';
-import { GraduationCap, ThumbsUp, ThumbsDown, RotateCw, CheckCircle2, Filter } from 'lucide-react';
+import { GraduationCap, ThumbsUp, ThumbsDown, RotateCw, CheckCircle2, Filter, ExternalLink } from 'lucide-react';
 
 const LANG_LABELS: Record<string, string> = {
   en: 'English', ja: '日本語', de: 'Deutsch', fr: 'Français',
@@ -18,21 +18,36 @@ interface ReviewWord extends VocabularyRow {
 export const FlashCard: React.FC = () => {
   const { rawItems, loadVocabulary } = useVocabulary();
   const { dailyReviewCount } = useSettingsStore();
-  const [queue, setQueue] = useState<ReviewWord[]>([]);
-  const [currentIdx, setCurrentIdx] = useState(0);
-  const [showAnswer, setShowAnswer] = useState(false);
-  const [reviewed, setReviewed] = useState(0);
-  const [remembered, setRemembered] = useState(0);
-  const [sessionComplete, setSessionComplete] = useState(false);
-  const [filterLang, setFilterLang] = useState<string>('all');
-  const [filterSource, setFilterSource] = useState<string>('all');
-  const initialized = useRef(false);
+  const reviewSnapshot = useReaderStore((s) => s.reviewSnapshot);
+  const restoredFromSnapshot = useRef(false);
+
+  const [queue, setQueue] = useState<ReviewWord[]>(() => reviewSnapshot?.queue ?? []);
+  const [currentIdx, setCurrentIdx] = useState(() => reviewSnapshot?.currentIdx ?? 0);
+  const [showAnswer, setShowAnswer] = useState(() => reviewSnapshot?.showAnswer ?? false);
+  const [reviewed, setReviewed] = useState(() => reviewSnapshot?.reviewed ?? 0);
+  const [remembered, setRemembered] = useState(() => reviewSnapshot?.remembered ?? 0);
+  const [sessionComplete, setSessionComplete] = useState(() => reviewSnapshot?.sessionComplete ?? false);
+  const [filterLang, setFilterLang] = useState<string>(() => reviewSnapshot?.filterLang ?? 'all');
+  const [filterSource, setFilterSource] = useState<string>(() => reviewSnapshot?.filterSource ?? 'all');
+  const initialized = useRef(!!reviewSnapshot);
 
   const viewMode = useReaderStore((s) => s.viewMode);
 
-  // Reload vocabulary every time the review tab becomes visible
+  // If restored from snapshot, clear it so future normal tab switches rebuild
+  useEffect(() => {
+    if (reviewSnapshot && !restoredFromSnapshot.current) {
+      restoredFromSnapshot.current = true;
+      useReaderStore.setState({ reviewSnapshot: null });
+    }
+  }, [reviewSnapshot]);
+
+  // Reload vocabulary every time the review tab becomes visible (but skip if restored from snapshot)
   useEffect(() => {
     if (viewMode === 'review') {
+      if (restoredFromSnapshot.current) {
+        restoredFromSnapshot.current = false;
+        return;
+      }
       initialized.current = false;
       loadVocabulary();
     }
@@ -302,6 +317,15 @@ export const FlashCard: React.FC = () => {
                     {current.sentence_translation}
                   </div>
                 )}
+                <button
+                  onClick={() => useReaderStore.getState().openWordDetailFromReview(current.word, {
+                    queue, currentIdx, showAnswer, reviewed, remembered, sessionComplete, filterLang, filterSource,
+                  })}
+                  className="inline-flex items-center gap-1 text-xs text-primary hover:text-primary/80 transition-colors mx-auto mt-2"
+                >
+                  <ExternalLink size={12} />
+                  查看详情
+                </button>
               </div>
             ) : (
               <div className="py-4 text-muted-foreground text-sm">

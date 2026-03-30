@@ -55,6 +55,19 @@ export const VocabularyList: React.FC = () => {
   const detailWordRef = useRef<string | null>(null);
 
   const viewMode = useReaderStore((s) => s.viewMode);
+  const reviewDetailWord = useReaderStore((s) => s.reviewDetailWord);
+  const returnToReview = useReaderStore((s) => s.returnToReview);
+
+  // Auto-open detail when navigating from review mode
+  useEffect(() => {
+    if (viewMode === 'vocabulary' && reviewDetailWord && entries.length > 0) {
+      const entry = entries.find((e) => e.word.toLowerCase() === reviewDetailWord.toLowerCase());
+      if (entry) {
+        setDetailWord(entry);
+        detailWordRef.current = entry.word;
+      }
+    }
+  }, [viewMode, reviewDetailWord, entries]);
 
   // Debounce search to avoid re-filtering on every keystroke
   useEffect(() => {
@@ -151,12 +164,15 @@ export const VocabularyList: React.FC = () => {
   }, []);
 
   const closeDetail = useCallback(() => {
+    if (reviewDetailWord) {
+      returnToReview();
+    }
     detailWordRef.current = null;
     setDetailWord(null);
     requestAnimationFrame(() => {
       if (scrollRef.current) scrollRef.current.scrollTop = savedScrollTop.current;
     });
-  }, []);
+  }, [reviewDetailWord, returnToReview]);
 
   // Sync detailWord with updated entries only when word key matches
   useEffect(() => {
@@ -191,9 +207,11 @@ export const VocabularyList: React.FC = () => {
         <div className="px-6 pt-10 pb-4 border-b border-border flex items-center gap-3">
           <button
             onClick={closeDetail}
-            className="w-8 h-8 rounded-lg hover:bg-accent flex items-center justify-center transition-colors shrink-0"
+            className="flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-accent transition-colors shrink-0 text-muted-foreground hover:text-foreground"
+            title={reviewDetailWord ? '返回复习' : '返回列表'}
           >
-            <ArrowLeft size={18} />
+            <ArrowLeft size={16} />
+            {reviewDetailWord && <span className="text-xs">返回复习</span>}
           </button>
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">

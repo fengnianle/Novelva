@@ -286,6 +286,8 @@ export interface SettingsState {
   systemInstruction: string;
   sentenceInstruction: string;
   dailyReviewCount: number;
+  readerFontColor: string;
+  readerBgColor: string;
   dictionaryApis: DictionaryConfig;
   vocabAnalysisPrompts: VocabAnalysisPromptsConfig;
 
@@ -306,6 +308,8 @@ export interface SettingsState {
   setSystemInstruction: (instruction: string) => void;
   setSentenceInstruction: (instruction: string) => void;
   setDailyReviewCount: (count: number) => void;
+  setReaderFontColor: (color: string) => void;
+  setReaderBgColor: (color: string) => void;
   setDictionaryApis: (apis: DictionaryConfig) => void;
   setVocabAnalysisPrompts: (prompts: VocabAnalysisPromptsConfig) => void;
   resetPrompts: () => void;
@@ -346,6 +350,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   systemInstruction: DEFAULT_SYSTEM_INSTRUCTION,
   sentenceInstruction: DEFAULT_SENTENCE_INSTRUCTION,
   dailyReviewCount: 20,
+  readerFontColor: '',
+  readerBgColor: '',
   dictionaryApis: { ...DEFAULT_DICTIONARY_APIS },
   vocabAnalysisPrompts: { ...DEFAULT_VOCAB_ANALYSIS_PROMPTS },
 
@@ -424,6 +430,16 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     (window as any).electronAPI?.saveSetting('dailyReviewCount', String(count));
   },
 
+  setReaderFontColor: (color) => {
+    set({ readerFontColor: color });
+    (window as any).electronAPI?.saveSetting('readerFontColor', color);
+  },
+
+  setReaderBgColor: (color) => {
+    set({ readerBgColor: color });
+    (window as any).electronAPI?.saveSetting('readerBgColor', color);
+  },
+
   setDictionaryApis: (apis) => {
     set({ dictionaryApis: apis });
     (window as any).electronAPI?.saveSetting('dictionaryApis', JSON.stringify(apis));
@@ -465,6 +481,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           systemInstruction: sysInstr,
           sentenceInstruction: sentInstr,
           dailyReviewCount: settings.dailyReviewCount ? Number(settings.dailyReviewCount) : 20,
+          readerFontColor: settings.readerFontColor || '',
+          readerBgColor: settings.readerBgColor || '',
           dictionaryApis: settings.dictionaryApis ? JSON.parse(settings.dictionaryApis) : { ...DEFAULT_DICTIONARY_APIS },
           vocabAnalysisPrompts: settings.vocabAnalysisPrompts ? JSON.parse(settings.vocabAnalysisPrompts) : { ...DEFAULT_VOCAB_ANALYSIS_PROMPTS },
         });
