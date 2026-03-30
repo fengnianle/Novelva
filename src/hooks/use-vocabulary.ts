@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { useReaderStore } from '../stores/reader-store';
 
 export interface VocabularyRow {
   id: number;
@@ -153,6 +154,7 @@ export function useVocabulary() {
       try {
         await api.dbRun('DELETE FROM vocabulary WHERE id = ?', [id]);
         await loadVocabulary();
+        useReaderStore.getState().bumpVocabRefresh();
       } catch (e) {
         console.error('Failed to remove from vocabulary:', e);
       }
@@ -168,6 +170,7 @@ export function useVocabulary() {
       try {
         await api.dbRun('DELETE FROM vocabulary WHERE LOWER(word) = LOWER(?)', [word]);
         await loadVocabulary();
+        useReaderStore.getState().bumpVocabRefresh();
       } catch (e) {
         console.error('Failed to remove word:', e);
       }

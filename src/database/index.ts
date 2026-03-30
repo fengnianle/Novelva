@@ -185,11 +185,15 @@ function migrateSchema(database: any): void {
   addColumn('sentence_cache', 'grammar_points', "TEXT DEFAULT '[]'");
   addColumn('reading_progress', 'language', "TEXT DEFAULT 'en'");
 
+  // v1.1.1: mastery tracking columns for review_schedule
+  addColumn('review_schedule', 'mastered', "INTEGER DEFAULT 0");
+  addColumn('review_schedule', 'consecutive_correct', "INTEGER DEFAULT 0");
+
   // Store schema version so older app versions can detect newer DB format
   // Old apps simply ignore unknown keys in the settings table
   try {
     database.run(
-      "INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '2')"
+      "INSERT OR REPLACE INTO settings (key, value) VALUES ('schema_version', '3')"
     );
   } catch (_) { /* ignore */ }
 }

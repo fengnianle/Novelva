@@ -3,8 +3,8 @@ import { useAiStore } from '../../stores/ai-store';
 import { useVocabulary } from '../../hooks/use-vocabulary';
 import { useReaderStore } from '../../stores/reader-store';
 import { SentenceData } from '../../lib/sentence-splitter';
-import { analyzeSentence } from '../../hooks/use-ai-analysis';
-import { X, Loader2, BookPlus, Check, RotateCw } from 'lucide-react';
+import { analyzeSentence, abortAnalysis } from '../../hooks/use-ai-analysis';
+import { X, Loader2, BookPlus, BookMinus, Check, RotateCw } from 'lucide-react';
 
 // Animated skeleton loading component for sentence analysis
 const LoadingSkeleton: React.FC = () => {
@@ -61,11 +61,21 @@ export const SentencePopover: React.FC<SentencePopoverProps> = ({
   onClose,
 }) => {
   const { loading, currentAnalysis, error } = useAiStore();
-  const { addToVocabulary } = useVocabulary();
+  const { addToVocabulary, removeFromVocabulary } = useVocabulary();
   const { currentBook } = useReaderStore();
   const popoverRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ top: 0, left: 0 });
   const [addedWords, setAddedWords] = useState<Set<string>>(new Set());
+  const [addedWordIds, setAddedWordIds] = useState<Map<string, number>>(new Map());
+
+  // Abort AI stream on unmount if still loading (saves tokens)
+  useEffect(() => {
+    return () => {
+      if (useAiStore.getState().loading) {
+        abortAnalysis();
+      }
+    };
+  }, []);
 
   const handleRegenerate = useCallback(() => {
     analyzeSentence(sentence.id, sentence.text, prevSentence, nextSentence, true);
@@ -78,16 +88,21 @@ export const SentencePopover: React.FC<SentencePopoverProps> = ({
       const api = (window as any).electronAPI;
       if (!api) return;
       const existing = new Set<string>();
+      const idMap = new Map<string, number>();
       for (const w of currentAnalysis.words) {
         try {
           const rows = await api.dbQuery(
             'SELECT id FROM vocabulary WHERE LOWER(word) = LOWER(?) AND sentence = ?',
             [w.word, sentence.text]
           );
-          if (rows && rows.length > 0) existing.add(w.word);
+          if (rows && rows.length > 0) {
+            existing.add(w.word);
+            idMap.set(w.word, rows[0].id);
+          }
         } catch (_) { /* ignore */ }
       }
       if (existing.size > 0) setAddedWords(existing);
+      if (idMap.size > 0) setAddedWordIds(idMap);
     };
     checkExisting();
   }, [currentAnalysis, sentence.text]);
@@ -164,6 +179,26 @@ export const SentencePopover: React.FC<SentencePopoverProps> = ({
       savePos
     );
     setAddedWords((prev) => new Set([...prev, word]));
+    // Re-query id for uncollect
+    try {
+      const _api = (window as any).electronAPI;
+      if (_api) {
+        const rows = await _api.dbQuery(
+          'SELECT id FROM vocabulary WHERE LOWER(word) = LOWER(?) AND sentence = ?',
+          [saveWord, sentence.text]
+        );
+        if (rows && rows.length > 0) setAddedWordIds((prev) => new Map(prev).set(word, rows[0].id));
+      }
+    } catch (_) { /* ignore */ }
+    useReaderStore.getState().bumpVocabRefresh();
+  };
+
+  const handleRemoveWord = async (word: string) => {
+    const id = addedWordIds.get(word);
+    if (id == null) return;
+    await removeFromVocabulary(id);
+    setAddedWords((prev) => { const next = new Set(prev); next.delete(word); return next; });
+    setAddedWordIds((prev) => { const next = new Map(prev); next.delete(word); return next; });
   };
 
   return (
@@ -286,7 +321,13 @@ export const SentencePopover: React.FC<SentencePopoverProps> = ({
                         </button>
                       )}
                       {addedWords.has(w.word) && (
-                        <span className="ml-0.5 text-xs text-green-500">✓</span>
+                        <button
+                          onClick={() => handleRemoveWord(w.word)}
+                          className="ml-0.5 text-green-500 hover:text-red-500 transition-colors"
+                          title="取消收藏"
+                        >
+                          <BookMinus size={12} />
+                        </button>
                       )}
                     </span>
                   ))}

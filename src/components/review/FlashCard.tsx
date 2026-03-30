@@ -13,6 +13,8 @@ interface ReviewWord extends VocabularyRow {
   ease_factor?: number;
   interval_days?: number;
   repetitions?: number;
+  mastered?: number;
+  consecutive_correct?: number;
 }
 
 export const FlashCard: React.FC = () => {
@@ -29,6 +31,10 @@ export const FlashCard: React.FC = () => {
   const [sessionComplete, setSessionComplete] = useState(() => reviewSnapshot?.sessionComplete ?? false);
   const [filterLang, setFilterLang] = useState<string>(() => reviewSnapshot?.filterLang ?? 'all');
   const [filterSource, setFilterSource] = useState<string>(() => reviewSnapshot?.filterSource ?? 'all');
+  const [forgottenWords, setForgottenWords] = useState<ReviewWord[]>(() => reviewSnapshot?.forgottenWords ?? []);
+  const [passNumber, setPassNumber] = useState(() => reviewSnapshot?.passNumber ?? 1);
+  const [totalReviewed, setTotalReviewed] = useState(() => reviewSnapshot?.totalReviewed ?? 0);
+  const [totalRemembered, setTotalRemembered] = useState(() => reviewSnapshot?.totalRemembered ?? 0);
   const initialized = useRef(!!reviewSnapshot);
 
   const viewMode = useReaderStore((s) => s.viewMode);
@@ -72,12 +78,18 @@ export const FlashCard: React.FC = () => {
     return items;
   }, [rawItems, filterLang, filterSource]);
 
-  // Build review queue using spaced repetition schedule
+  // Balanced spaced-repetition queue builder (Anki-inspired).
+  // Allocates slots: ~50% due/overdue, ~30% new, ~5% mastered, rest filled with upcoming.
+  // Always aims to fill dailyReviewCount so "重新抽取" never yields too few words.
   const buildQueue = useCallback(async () => {
     const api = (window as any).electronAPI;
     if (!api || filteredItems.length === 0) return;
 
     const filteredWordSet = new Set(filteredItems.map((i) => i.word.toLowerCase()));
+    const SELECT_COLS = `rs.word, rs.ease_factor, rs.interval_days, rs.repetitions, rs.next_review_date,
+      rs.last_review_date, rs.mastered, rs.consecutive_correct,
+      v.meaning, v.sentence, v.sentence_translation, v.source_file, v.language`;
+    const filterRows = (rows: any[]) => (rows || []).filter((r: any) => filteredWordSet.has(r.word.toLowerCase()));
 
     try {
       // Ensure all vocabulary words have a review_schedule entry
@@ -88,42 +100,117 @@ export const FlashCard: React.FC = () => {
         );
       }
 
-      // Get words due for review (next_review_date <= today), ordered by urgency
-      const dueRows = await api.dbQuery(
-        `SELECT rs.*, v.meaning, v.sentence, v.sentence_translation, v.source_file, v.language
-         FROM review_schedule rs
+      const total = dailyReviewCount;
+      const dueSlots = Math.ceil(total * 0.50);    // 50% due/overdue
+      const newSlots = Math.ceil(total * 0.30);     // 30% new words
+      const masteredSlots = Math.max(1, Math.ceil(total * 0.05)); // 5% mastered
+
+      // 1. Due/overdue words (not mastered, next_review_date <= today)
+      const dueRows = filterRows(await api.dbQuery(
+        `SELECT ${SELECT_COLS} FROM review_schedule rs
          JOIN vocabulary v ON LOWER(v.word) = rs.word
          WHERE rs.next_review_date <= date('now')
+           AND (rs.mastered IS NULL OR rs.mastered = 0) AND rs.repetitions > 0
          GROUP BY rs.word
          ORDER BY rs.next_review_date ASC, rs.ease_factor ASC
          LIMIT ?`,
-        [dailyReviewCount * 2]
-      );
+        [dueSlots * 2]
+      )).slice(0, dueSlots);
 
-      // Filter due rows by the current filter set
-      const filteredDue = (dueRows || []).filter((r: any) => filteredWordSet.has(r.word.toLowerCase())).slice(0, dailyReviewCount);
+      // 2. New words (never reviewed — repetitions = 0, not mastered)
+      const newRows = filterRows(await api.dbQuery(
+        `SELECT ${SELECT_COLS} FROM review_schedule rs
+         JOIN vocabulary v ON LOWER(v.word) = rs.word
+         WHERE (rs.mastered IS NULL OR rs.mastered = 0) AND rs.repetitions = 0
+         GROUP BY rs.word
+         ORDER BY RANDOM()
+         LIMIT ?`,
+        [newSlots * 2]
+      )).slice(0, newSlots);
 
-      if (filteredDue.length > 0) {
-        setQueue(filteredDue);
-        setCurrentIdx(0);
-        setShowAnswer(false);
-        setReviewed(0);
-        setRemembered(0);
-        setSessionComplete(false);
-      } else {
-        // No words due — pick random from filtered vocab for extra practice
-        const shuffled = [...filteredItems].sort(() => Math.random() - 0.5).slice(0, dailyReviewCount);
-        setQueue(shuffled);
-        setCurrentIdx(0);
-        setShowAnswer(false);
-        setReviewed(0);
-        setRemembered(0);
-        setSessionComplete(false);
+      // 3. Mastered words (low-freq reinforcement, oldest reviewed first)
+      const masteredRows = filterRows(await api.dbQuery(
+        `SELECT ${SELECT_COLS} FROM review_schedule rs
+         JOIN vocabulary v ON LOWER(v.word) = rs.word
+         WHERE rs.mastered = 1
+         GROUP BY rs.word
+         ORDER BY rs.last_review_date ASC
+         LIMIT ?`,
+        [masteredSlots * 2]
+      )).slice(0, masteredSlots);
+
+      // Deduplicate: due > new > mastered (priority order)
+      const seen = new Set<string>();
+      const dedup = (rows: ReviewWord[]) => {
+        const result: ReviewWord[] = [];
+        for (const r of rows) {
+          const key = r.word.toLowerCase();
+          if (!seen.has(key)) { seen.add(key); result.push(r); }
+        }
+        return result;
+      };
+
+      let finalQueue: ReviewWord[] = [
+        ...dedup(dueRows),
+        ...dedup(newRows),
+        ...dedup(masteredRows),
+      ];
+
+      // 4. If still under target, fill with upcoming (not yet due, not mastered, soonest first)
+      if (finalQueue.length < total) {
+        const remaining = total - finalQueue.length;
+        const upcomingRows = filterRows(await api.dbQuery(
+          `SELECT ${SELECT_COLS} FROM review_schedule rs
+           JOIN vocabulary v ON LOWER(v.word) = rs.word
+           WHERE rs.next_review_date > date('now')
+             AND (rs.mastered IS NULL OR rs.mastered = 0) AND rs.repetitions > 0
+           GROUP BY rs.word
+           ORDER BY rs.next_review_date ASC
+           LIMIT ?`,
+          [remaining * 2]
+        ));
+        finalQueue = [...finalQueue, ...dedup(upcomingRows).slice(0, remaining)];
       }
+
+      // 5. If STILL under target (very small vocab), fill with random from vocab
+      if (finalQueue.length < total) {
+        const remaining = total - finalQueue.length;
+        const randomFill = [...filteredItems]
+          .filter((i) => !seen.has(i.word.toLowerCase()))
+          .sort(() => Math.random() - 0.5)
+          .slice(0, remaining);
+        finalQueue = [...finalQueue, ...randomFill];
+      }
+
+      // Shuffle the final queue for variety (don't always show due→new→mastered in order)
+      for (let i = finalQueue.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [finalQueue[i], finalQueue[j]] = [finalQueue[j], finalQueue[i]];
+      }
+
+      setQueue(finalQueue.length > 0 ? finalQueue : [...filteredItems].sort(() => Math.random() - 0.5).slice(0, total));
+      setCurrentIdx(0);
+      setShowAnswer(false);
+      setReviewed(0);
+      setRemembered(0);
+      setSessionComplete(false);
+      setForgottenWords([]);
+      setPassNumber(1);
+      setTotalReviewed(0);
+      setTotalRemembered(0);
     } catch (e) {
       console.error('Failed to build review queue:', e);
       const shuffled = [...filteredItems].sort(() => Math.random() - 0.5).slice(0, dailyReviewCount);
       setQueue(shuffled);
+      setCurrentIdx(0);
+      setShowAnswer(false);
+      setReviewed(0);
+      setRemembered(0);
+      setSessionComplete(false);
+      setForgottenWords([]);
+      setPassNumber(1);
+      setTotalReviewed(0);
+      setTotalRemembered(0);
     }
   }, [filteredItems, dailyReviewCount]);
 
@@ -141,8 +228,9 @@ export const FlashCard: React.FC = () => {
     }
   }, [filterLang, filterSource]);
 
-  // SM-2 algorithm: update schedule based on user response
-  const handleResponse = useCallback(async (remembered: boolean) => {
+  // SM-2 algorithm: update schedule based on user response + mastery tracking
+  // Review loop: track forgotten words in each pass; re-queue them until all remembered
+  const handleResponse = useCallback(async (rememberedWord: boolean) => {
     const current = queue[currentIdx];
     if (!current) return;
 
@@ -152,13 +240,16 @@ export const FlashCard: React.FC = () => {
         const ef = current.ease_factor || 2.5;
         const rep = current.repetitions || 0;
         const interval = current.interval_days || 0;
+        const wasMastered = current.mastered || 0;
+        const prevConsecutive = current.consecutive_correct || 0;
 
         let newEf = ef;
         let newInterval: number;
         let newRep: number;
+        let newConsecutive: number;
+        let newMastered = wasMastered;
 
-        if (remembered) {
-          // Quality = 4 (correct, some hesitation)
+        if (rememberedWord) {
           newEf = Math.max(1.3, ef + (0.1 - (5 - 4) * (0.08 + (5 - 4) * 0.02)));
           if (rep === 0) {
             newInterval = 1;
@@ -168,11 +259,18 @@ export const FlashCard: React.FC = () => {
             newInterval = Math.round(interval * newEf);
           }
           newRep = rep + 1;
+          newConsecutive = prevConsecutive + 1;
+          if (newConsecutive >= 5 && !wasMastered) {
+            newMastered = 1;
+          }
         } else {
-          // Quality = 1 (forgot)
           newEf = Math.max(1.3, ef - 0.2);
-          newInterval = 0; // Review again today
+          newInterval = 0;
           newRep = 0;
+          newConsecutive = 0;
+          if (wasMastered) {
+            newMastered = 0;
+          }
         }
 
         const nextDate = new Date();
@@ -182,27 +280,56 @@ export const FlashCard: React.FC = () => {
         await api.dbRun(
           `UPDATE review_schedule 
            SET ease_factor = ?, interval_days = ?, repetitions = ?, 
-               next_review_date = ?, last_review_date = date('now')
+               next_review_date = ?, last_review_date = date('now'),
+               consecutive_correct = ?, mastered = ?
            WHERE word = ?`,
-          [newEf, newInterval, newRep, nextDateStr, current.word.toLowerCase()]
+          [newEf, newInterval, newRep, nextDateStr, newConsecutive, newMastered, current.word.toLowerCase()]
         );
       } catch (e) {
         console.error('Failed to update review schedule:', e);
       }
     }
 
+    // Track stats for this pass
     setReviewed((r) => r + 1);
-    if (remembered) setRemembered((r) => r + 1);
+    setTotalReviewed((r) => r + 1);
+    if (rememberedWord) {
+      setRemembered((r) => r + 1);
+      setTotalRemembered((r) => r + 1);
+    } else {
+      // Add to forgotten list for this pass
+      setForgottenWords((prev) => [...prev, current]);
+    }
 
     if (currentIdx + 1 >= queue.length) {
-      setSessionComplete(true);
+      // Pass ended — check if there are forgotten words to re-queue
+      // We need to use the latest forgottenWords + possibly current forgotten word
+      const newForgotten = rememberedWord ? forgottenWords : [...forgottenWords, current];
+      if (newForgotten.length > 0) {
+        // Shuffle forgotten words and start a new pass
+        const shuffled = [...newForgotten].sort(() => Math.random() - 0.5);
+        setQueue(shuffled);
+        setCurrentIdx(0);
+        setShowAnswer(false);
+        setReviewed(0);
+        setRemembered(0);
+        setForgottenWords([]);
+        setPassNumber((p) => p + 1);
+      } else {
+        // All words remembered in this pass — session complete!
+        setSessionComplete(true);
+      }
     } else {
       setCurrentIdx((i) => i + 1);
       setShowAnswer(false);
     }
-  }, [queue, currentIdx]);
+  }, [queue, currentIdx, forgottenWords]);
 
   const startNewRound = useCallback(() => {
+    setForgottenWords([]);
+    setPassNumber(1);
+    setTotalReviewed(0);
+    setTotalRemembered(0);
     initialized.current = false;
     buildQueue();
   }, [buildQueue]);
@@ -218,14 +345,15 @@ export const FlashCard: React.FC = () => {
   }
 
   if (sessionComplete) {
-    const accuracy = reviewed > 0 ? Math.round((remembered / reviewed) * 100) : 0;
+    const accuracy = totalReviewed > 0 ? Math.round((totalRemembered / totalReviewed) * 100) : 0;
     return (
       <div className="h-full flex flex-col items-center justify-center gap-6">
         <CheckCircle2 size={64} className="text-green-500" strokeWidth={1.5} />
         <div className="text-center">
           <h2 className="text-2xl font-bold mb-2">本轮复习完成!</h2>
           <p className="text-muted-foreground">
-            共复习 {reviewed} 个单词，记住 {remembered} 个
+            共复习 {totalReviewed} 次，记住 {totalRemembered} 次
+            {passNumber > 1 && <span> · 循环 {passNumber} 轮</span>}
           </p>
           <div className="mt-3 flex items-center justify-center gap-2">
             <div className="w-32 h-2 bg-secondary rounded-full overflow-hidden">
@@ -261,7 +389,9 @@ export const FlashCard: React.FC = () => {
           </button>
         </div>
         <p className="text-sm text-muted-foreground mt-1">
-          进度 {currentIdx + 1}/{queue.length} · 词库共 {filteredItems.length} 词
+          进度 {currentIdx + 1}/{queue.length}
+          {passNumber > 1 && <span className="text-orange-500"> · 第 {passNumber} 轮复习</span>}
+          {' '}· 词库共 {filteredItems.length} 词
           {filteredItems.length !== rawItems.length && ` (全部 ${rawItems.length})`}
         </p>
         {(languages.length > 1 || sourceFiles.length > 0) && (
@@ -320,6 +450,7 @@ export const FlashCard: React.FC = () => {
                 <button
                   onClick={() => useReaderStore.getState().openWordDetailFromReview(current.word, {
                     queue, currentIdx, showAnswer, reviewed, remembered, sessionComplete, filterLang, filterSource,
+                    forgottenWords, passNumber, totalReviewed, totalRemembered,
                   })}
                   className="inline-flex items-center gap-1 text-xs text-primary hover:text-primary/80 transition-colors mx-auto mt-2"
                 >

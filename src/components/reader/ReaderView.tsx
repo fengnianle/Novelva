@@ -70,6 +70,7 @@ export const ReaderView: React.FC = () => {
   const lineHeight = useSettingsStore((s) => s.lineHeight);
   const readerFontColor = useSettingsStore((s) => s.readerFontColor);
   const readerBgColor = useSettingsStore((s) => s.readerBgColor);
+  const vocabRefreshCounter = useReaderStore((s) => s.vocabRefreshCounter);
   const { importFile, openRecentBook } = useFileImport();
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -90,10 +91,34 @@ export const ReaderView: React.FC = () => {
   const [collectedSentences, setCollectedSentences] = useState<Set<string>>(new Set());
   const [vocabWords, setVocabWords] = useState<Set<string>>(new Set());
 
+  const autoOpenAttempted = useRef(false);
+
   // Load recent books on mount
   useEffect(() => {
     loadRecentBooks();
   }, [loadRecentBooks]);
+
+  // Auto-open the most recently read file on app startup
+  useEffect(() => {
+    if (currentBook || autoOpenAttempted.current) return;
+    autoOpenAttempted.current = true;
+
+    const tryAutoOpen = async () => {
+      const api = (window as any).electronAPI;
+      if (!api) return;
+      try {
+        const rows = await api.dbQuery(
+          'SELECT file_path, file_name FROM reading_progress ORDER BY last_read_at DESC LIMIT 1'
+        );
+        if (!rows || rows.length === 0) return;
+        const { file_path, file_name } = rows[0];
+        const exists = await api.fileExists(file_path);
+        if (!exists) return;
+        openRecentBook(file_path, file_name);
+      } catch (_) { /* ignore */ }
+    };
+    tryAutoOpen();
+  }, [currentBook, openRecentBook]);
 
   // Load bookmark, collected sentences, vocab words when book changes
   useEffect(() => {
@@ -109,20 +134,28 @@ export const ReaderView: React.FC = () => {
       setBookmarkSentenceId(rows && rows.length > 0 ? rows[0].value : null);
     }).catch(() => {});
 
-    // Load collected sentences (sentences that exist in vocabulary table)
-    api.dbQuery('SELECT DISTINCT sentence FROM vocabulary').then((rows: any[]) => {
+    // Load analyzed sentences (only from sentence_cache — underline = AI-analyzed)
+    api.dbQuery('SELECT DISTINCT sentence_text FROM sentence_cache').then((rows: any[]) => {
       const set = new Set<string>();
-      if (rows) for (const r of rows) set.add(r.sentence);
-      setCollectedSentences(set);
+      if (rows) for (const r of rows) set.add(r.sentence_text);
+      setCollectedSentences((prev) => {
+        if (prev.size !== set.size) return set;
+        for (const s of set) { if (!prev.has(s)) return set; }
+        return prev;
+      });
     }).catch(() => {});
 
     // Load vocab words
     api.dbQuery('SELECT DISTINCT LOWER(word) as w FROM vocabulary').then((rows: any[]) => {
       const set = new Set<string>();
       if (rows) for (const r of rows) set.add(r.w);
-      setVocabWords(set);
+      setVocabWords((prev) => {
+        if (prev.size !== set.size) return set;
+        for (const s of set) { if (!prev.has(s)) return set; }
+        return prev;
+      });
     }).catch(() => {});
-  }, [currentBook?.filePath]);
+  }, [currentBook?.filePath, vocabRefreshCounter]);
 
   // Handle bookmark toggle
   const handleBookmark = useCallback((sentenceId: string) => {

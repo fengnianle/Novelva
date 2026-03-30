@@ -1,5 +1,6 @@
 import { useAiStore, SentenceAnalysis } from '../stores/ai-store';
 import { useSettingsStore } from '../stores/settings-store';
+import { useReaderStore } from '../stores/reader-store';
 
 function buildPrompt(
   template: string,
@@ -18,6 +19,20 @@ function buildPrompt(
 
 // Cleanup function for active stream listeners
 let activeStreamCleanup: (() => void) | null = null;
+let activeStreamId: string | null = null;
+
+// Abort the current analysis stream (call from popover close to save tokens)
+export function abortAnalysis(): void {
+  activeStreamCleanup?.();
+  activeStreamCleanup = null;
+  if (activeStreamId) {
+    const api = (window as any).electronAPI;
+    api?.abortStream(activeStreamId);
+    activeStreamId = null;
+  }
+  const { loading, setLoading } = useAiStore.getState();
+  if (loading) setLoading(false);
+}
 
 function parseAnalysisResponse(rawResponse: string): SentenceAnalysis {
   let jsonStr = rawResponse.trim();
@@ -102,8 +117,7 @@ export async function analyzeSentence(
   if (!api) return;
 
   // Cleanup previous stream if still active
-  activeStreamCleanup?.();
-  activeStreamCleanup = null;
+  abortAnalysis();
 
   // Check cache first (skip if regenerating)
   if (!skipCache) {
@@ -139,6 +153,7 @@ export async function analyzeSentence(
   setLoading(true);
 
   const streamId = `sentence-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  activeStreamId = streamId;
   let cleanupFn: (() => void) | null = null;
 
   try {
@@ -177,19 +192,25 @@ export async function analyzeSentence(
     // Clean up listeners
     removeChunkListener();
     activeStreamCleanup = null;
+    activeStreamId = null;
     cleanupFn = null;
 
     const analysis = parseAnalysisResponse(rawResponse);
     setCurrentAnalysis(analysis);
 
-    // Cache in background
-    cacheAnalysis(api, sentenceHash, currentSentence, prevSentence, nextSentence, analysis);
+    // Cache in background, then refresh underlines
+    cacheAnalysis(api, sentenceHash, currentSentence, prevSentence, nextSentence, analysis).then(() => {
+      useReaderStore.getState().bumpVocabRefresh();
+    });
   } catch (err) {
     if (cleanupFn) {
       (cleanupFn as () => void)();
       activeStreamCleanup = null;
     }
-    setError(`AI 解析失败: ${(err as Error).message}`);
+    // Silently ignore abort — user intentionally cancelled
+    const msg = (err as Error).message || '';
+    if (msg.includes('aborted') || msg.includes('Abort')) return;
+    setError(`AI 解析失败: ${msg}`);
   }
 }
 

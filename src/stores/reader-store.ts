@@ -26,6 +26,10 @@ export interface ReviewSnapshot {
   sessionComplete: boolean;
   filterLang: string;
   filterSource: string;
+  forgottenWords: any[];
+  passNumber: number;
+  totalReviewed: number;
+  totalRemembered: number;
 }
 
 export interface ReaderState {
@@ -39,6 +43,8 @@ export interface ReaderState {
   readingProgress: number;
   reviewDetailWord: string | null;
   reviewSnapshot: ReviewSnapshot | null;
+  vocabRefreshCounter: number;
+  readerDetailWord: string | null;
 
   setCurrentBook: (book: BookInfo | null) => void;
   setViewMode: (mode: ViewMode) => void;
@@ -52,6 +58,9 @@ export interface ReaderState {
   setReadingProgress: (progress: number) => void;
   openWordDetailFromReview: (word: string, snapshot: ReviewSnapshot) => void;
   returnToReview: () => void;
+  bumpVocabRefresh: () => void;
+  openWordDetailFromReader: (word: string) => void;
+  returnToReader: () => void;
 }
 
 export const useReaderStore = create<ReaderState>((set) => ({
@@ -65,11 +74,16 @@ export const useReaderStore = create<ReaderState>((set) => ({
   readingProgress: 0,
   reviewDetailWord: null,
   reviewSnapshot: null,
+  vocabRefreshCounter: 0,
+  readerDetailWord: null,
 
   setCurrentBook: (book) => set({ currentBook: book }),
   setViewMode: (mode) => set({ viewMode: mode, selectedSentenceId: null, selectedWord: null }),
   openWordDetailFromReview: (word, snapshot) => set({ viewMode: 'vocabulary', reviewDetailWord: word, reviewSnapshot: snapshot }),
   returnToReview: () => set({ viewMode: 'review', reviewDetailWord: null }),
+  bumpVocabRefresh: () => set((s) => ({ vocabRefreshCounter: s.vocabRefreshCounter + 1 })),
+  openWordDetailFromReader: (word) => set({ viewMode: 'vocabulary', readerDetailWord: word }),
+  returnToReader: () => set({ viewMode: 'reader', readerDetailWord: null }),
   setSelectedSentenceId: (id) => set({ selectedSentenceId: id, selectedWord: null }),
   setSelectedWord: (word) => set({ selectedWord: word }),
   setFileLoading: (loading, message = '') => set({ fileLoading: loading, fileLoadingMessage: message }),

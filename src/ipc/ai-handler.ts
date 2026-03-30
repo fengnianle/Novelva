@@ -1,6 +1,9 @@
 import { ipcMain, BrowserWindow } from 'electron';
 import { runSql, queryAll } from '../database/index';
 
+// Track active stream AbortControllers so they can be cancelled from renderer
+const activeStreams = new Map<string, AbortController>();
+
 // ── Provider configurations ──
 export interface AiProviderConfig {
   id: string;
@@ -135,6 +138,9 @@ export function registerAiHandlers(): void {
         const modelName = model || 'deepseek-chat';
         const sid = streamId || 'default';
 
+        const controller = new AbortController();
+        activeStreams.set(sid, controller);
+
         const response = await fetch(
           `${baseUrl}/v1/chat/completions`,
           {
@@ -153,6 +159,7 @@ export function registerAiHandlers(): void {
               max_tokens: 1200,
               stream: true,
             }),
+            signal: controller.signal,
           }
         );
 
@@ -198,10 +205,14 @@ export function registerAiHandlers(): void {
 
         // Track usage (estimate for streaming — exact usage not always provided)
         trackTokenUsage({ prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, callCount: 0 });
+        activeStreams.delete(sid);
         // Signal completion
         win.webContents.send(`ai:stream-done:${sid}`, fullContent);
         return fullContent;
       } catch (err) {
+        activeStreams.delete(streamId || 'default');
+        // Silently ignore AbortError — it means the user intentionally cancelled
+        if ((err as any)?.name === 'AbortError') return '';
         console.error('AI stream error:', err);
         const win = BrowserWindow.fromWebContents(event.sender);
         if (win) {
@@ -211,6 +222,17 @@ export function registerAiHandlers(): void {
       }
     }
   );
+
+  // Abort an active stream
+  ipcMain.handle('ai:abort-stream', (_event, streamId: string) => {
+    const controller = activeStreams.get(streamId);
+    if (controller) {
+      controller.abort();
+      activeStreams.delete(streamId);
+      return true;
+    }
+    return false;
+  });
 
   // Return provider list
   ipcMain.handle('ai:get-providers', () => AI_PROVIDERS);

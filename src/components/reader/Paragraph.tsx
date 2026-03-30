@@ -30,6 +30,14 @@ export const Paragraph: React.FC<ParagraphProps> = React.memo(({ paragraph, coll
       ))}
     </p>
   );
+}, (prev, next) => {
+  if (prev.paragraph !== next.paragraph) return false;
+  if (prev.bookmarkSentenceId !== next.bookmarkSentenceId) return false;
+  if (prev.onContextMenu !== next.onContextMenu) return false;
+  // Compare Sets by reference — they are stabilized in ReaderView
+  if (prev.collectedSentences !== next.collectedSentences) return false;
+  if (prev.vocabWords !== next.vocabWords) return false;
+  return true;
 });
 
 // ── Virtualized paragraph list ──
@@ -107,21 +115,29 @@ export const VirtualizedParagraphs: React.FC<VirtualizedParagraphsProps> = React
     return { startIdx: start, endIdx: end };
   }, [paragraphs.length, offsets, scrollTop, viewportHeight]);
 
-  // Listen to parent scroll container
+  // Listen to parent scroll container (RAF-throttled to avoid per-pixel re-renders)
+  const rafRef = useRef(0);
   useEffect(() => {
     const el = containerRef.current?.parentElement;
     if (!el) return;
     const onScroll = () => {
-      setScrollTop(el.scrollTop);
-      setViewportHeight(el.clientHeight);
+      if (rafRef.current) return;
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = 0;
+        setScrollTop(el.scrollTop);
+        setViewportHeight(el.clientHeight);
+      });
     };
-    onScroll(); // init
+    // init
+    setScrollTop(el.scrollTop);
+    setViewportHeight(el.clientHeight);
     el.addEventListener('scroll', onScroll, { passive: true });
     const ro = new ResizeObserver(() => setViewportHeight(el.clientHeight));
     ro.observe(el);
     return () => {
       el.removeEventListener('scroll', onScroll);
       ro.disconnect();
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
   }, []);
 

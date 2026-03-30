@@ -3,7 +3,7 @@ import { useAiStore, WordAnalysis } from '../../stores/ai-store';
 import { useVocabulary } from '../../hooks/use-vocabulary';
 import { useReaderStore } from '../../stores/reader-store';
 import { useSettingsStore } from '../../stores/settings-store';
-import { X, BookPlus, Loader2 } from 'lucide-react';
+import { X, BookPlus, BookMinus, Loader2, ExternalLink } from 'lucide-react';
 
 interface WordPopoverProps {
   word: string;
@@ -19,7 +19,7 @@ export const WordPopover: React.FC<WordPopoverProps> = ({
   onClose,
 }) => {
   const { getFromWordCache, addToWordCache, currentAnalysis } = useAiStore();
-  const { addToVocabulary } = useVocabulary();
+  const { addToVocabulary, removeFromVocabulary } = useVocabulary();
   const { currentBook } = useReaderStore();
   const { apiKey, getProviderConfig } = useSettingsStore();
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -74,10 +74,41 @@ export const WordPopover: React.FC<WordPopoverProps> = ({
       return;
     }
 
-    // Not cached — fetch via AI
+    // Try local DB before calling AI
     const fetchWord = async () => {
       const api = (window as any).electronAPI;
-      if (!api || !apiKey) {
+      if (!api) return;
+
+      // 1. Check word_cache DB table
+      try {
+        const wcRows = await api.dbQuery(
+          'SELECT word, meaning, pos FROM word_cache WHERE word = ?',
+          [word.toLowerCase()]
+        );
+        if (wcRows && wcRows.length > 0) {
+          const result: WordAnalysis = { word: wcRows[0].word, meaning: wcRows[0].meaning, pos: wcRows[0].pos || '' };
+          setWordData(result);
+          addToWordCache(word, result);
+          return;
+        }
+      } catch (_) { /* ignore */ }
+
+      // 2. Check vocabulary DB table
+      try {
+        const vRows = await api.dbQuery(
+          'SELECT word, meaning, pos FROM vocabulary WHERE LOWER(word) = LOWER(?) LIMIT 1',
+          [word]
+        );
+        if (vRows && vRows.length > 0) {
+          const result: WordAnalysis = { word: vRows[0].word, meaning: vRows[0].meaning, pos: vRows[0].pos || '' };
+          setWordData(result);
+          addToWordCache(word, result);
+          return;
+        }
+      } catch (_) { /* ignore */ }
+
+      // 3. Not found locally — fetch via AI
+      if (!apiKey) {
         setWordError('请先配置 API Key');
         return;
       }
@@ -133,6 +164,7 @@ export const WordPopover: React.FC<WordPopoverProps> = ({
   }, [onClose]);
 
   // Check if already in vocabulary
+  const [existingId, setExistingId] = useState<number | null>(null);
   useEffect(() => {
     const checkExists = async () => {
       const api = (window as any).electronAPI;
@@ -142,7 +174,10 @@ export const WordPopover: React.FC<WordPopoverProps> = ({
           'SELECT id FROM vocabulary WHERE LOWER(word) = LOWER(?) AND sentence = ?',
           [word, sentence]
         );
-        if (rows && rows.length > 0) setAdded(true);
+        if (rows && rows.length > 0) {
+          setAdded(true);
+          setExistingId(rows[0].id);
+        }
       } catch (_) { /* ignore */ }
     };
     checkExists();
@@ -176,7 +211,26 @@ export const WordPopover: React.FC<WordPopoverProps> = ({
       savePos
     );
     setAdded(true);
+    // Re-query the id so we can uncollect later
+    try {
+      const _api = (window as any).electronAPI;
+      if (_api) {
+        const rows = await _api.dbQuery(
+          'SELECT id FROM vocabulary WHERE LOWER(word) = LOWER(?) AND sentence = ?',
+          [word, sentence]
+        );
+        if (rows && rows.length > 0) setExistingId(rows[0].id);
+      }
+    } catch (_) { /* ignore */ }
+    useReaderStore.getState().bumpVocabRefresh();
   }, [word, wordData, sentence, added, addToVocabulary, currentAnalysis, currentBook]);
+
+  const handleRemove = useCallback(async () => {
+    if (!added || existingId == null) return;
+    await removeFromVocabulary(existingId);
+    setAdded(false);
+    setExistingId(null);
+  }, [added, existingId, removeFromVocabulary]);
 
   return (
     <div
@@ -210,7 +264,7 @@ export const WordPopover: React.FC<WordPopoverProps> = ({
         {wordData && (
           <>
             <div className="text-sm">{wordData.meaning}</div>
-            <div className="mt-2 flex justify-end">
+            <div className="mt-2 flex justify-end gap-3">
               {!added ? (
                 <button
                   onClick={handleAdd}
@@ -220,7 +274,22 @@ export const WordPopover: React.FC<WordPopoverProps> = ({
                   加入词汇本
                 </button>
               ) : (
-                <span className="text-xs text-green-500">已收藏 ✓</span>
+                <>
+                  <button
+                    onClick={handleRemove}
+                    className="inline-flex items-center gap-1 text-xs text-green-500 hover:text-red-500 transition-colors"
+                  >
+                    <BookMinus size={12} />
+                    已收藏 ✓
+                  </button>
+                  <button
+                    onClick={() => { onClose(); useReaderStore.getState().openWordDetailFromReader(word); }}
+                    className="inline-flex items-center gap-1 text-xs text-primary hover:text-primary/80 transition-colors"
+                  >
+                    <ExternalLink size={12} />
+                    查看详情
+                  </button>
+                </>
               )}
             </div>
           </>

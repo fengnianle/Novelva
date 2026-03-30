@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { useVocabulary, VocabularyEntry, VocabMeaning } from '../../hooks/use-vocabulary';
 import { useReaderStore } from '../../stores/reader-store';
-import { Trash2, BookOpen, Search, ChevronDown, ChevronRight, X, ArrowLeft, ExternalLink, Filter } from 'lucide-react';
+import { Trash2, BookOpen, Search, ChevronDown, ChevronRight, X, ArrowLeft, ExternalLink, Filter, Award, Clock } from 'lucide-react';
 import { DictionaryDetail } from './DictionaryDetail';
 import { VocabAIAnalysis } from './VocabAIAnalysis';
 
@@ -49,6 +49,7 @@ export const VocabularyList: React.FC = () => {
   const [filterSource, setFilterSource] = useState<string>('all');
   const [expandedWord, setExpandedWord] = useState<string | null>(null);
   const [detailWord, setDetailWord] = useState<VocabularyEntry | null>(null);
+  const [reviewStats, setReviewStats] = useState<{ mastered: number; consecutive_correct: number; last_review_date: string | null; repetitions: number } | null>(null);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const scrollRef = useRef<HTMLDivElement>(null);
   const savedScrollTop = useRef(0);
@@ -57,17 +58,20 @@ export const VocabularyList: React.FC = () => {
   const viewMode = useReaderStore((s) => s.viewMode);
   const reviewDetailWord = useReaderStore((s) => s.reviewDetailWord);
   const returnToReview = useReaderStore((s) => s.returnToReview);
+  const readerDetailWord = useReaderStore((s) => s.readerDetailWord);
+  const returnToReader = useReaderStore((s) => s.returnToReader);
 
-  // Auto-open detail when navigating from review mode
+  // Auto-open detail when navigating from review mode or reader mode
   useEffect(() => {
-    if (viewMode === 'vocabulary' && reviewDetailWord && entries.length > 0) {
-      const entry = entries.find((e) => e.word.toLowerCase() === reviewDetailWord.toLowerCase());
+    const targetWord = reviewDetailWord || readerDetailWord;
+    if (viewMode === 'vocabulary' && targetWord && entries.length > 0) {
+      const entry = entries.find((e) => e.word.toLowerCase() === targetWord.toLowerCase());
       if (entry) {
         setDetailWord(entry);
         detailWordRef.current = entry.word;
       }
     }
-  }, [viewMode, reviewDetailWord, entries]);
+  }, [viewMode, reviewDetailWord, readerDetailWord, entries]);
 
   // Debounce search to avoid re-filtering on every keystroke
   useEffect(() => {
@@ -166,13 +170,15 @@ export const VocabularyList: React.FC = () => {
   const closeDetail = useCallback(() => {
     if (reviewDetailWord) {
       returnToReview();
+    } else if (readerDetailWord) {
+      returnToReader();
     }
     detailWordRef.current = null;
     setDetailWord(null);
     requestAnimationFrame(() => {
       if (scrollRef.current) scrollRef.current.scrollTop = savedScrollTop.current;
     });
-  }, [reviewDetailWord, returnToReview]);
+  }, [reviewDetailWord, returnToReview, readerDetailWord, returnToReader]);
 
   // Sync detailWord with updated entries only when word key matches
   useEffect(() => {
@@ -186,6 +192,44 @@ export const VocabularyList: React.FC = () => {
       }
     }
   }, [entries]);
+
+  // Load review stats when detail word changes
+  useEffect(() => {
+    if (!detailWord) { setReviewStats(null); return; }
+    const api = (window as any).electronAPI;
+    if (!api) return;
+    api.dbQuery(
+      'SELECT mastered, consecutive_correct, last_review_date, repetitions FROM review_schedule WHERE word = ?',
+      [detailWord.word.toLowerCase()]
+    ).then((rows: any[]) => {
+      if (rows && rows.length > 0) {
+        setReviewStats({
+          mastered: rows[0].mastered || 0,
+          consecutive_correct: rows[0].consecutive_correct || 0,
+          last_review_date: rows[0].last_review_date || null,
+          repetitions: rows[0].repetitions || 0,
+        });
+      } else {
+        setReviewStats(null);
+      }
+    }).catch(() => setReviewStats(null));
+  }, [detailWord?.word]);
+
+  // Toggle mastery for the detail word
+  const toggleMastery = useCallback(async () => {
+    if (!detailWord) return;
+    const api = (window as any).electronAPI;
+    if (!api) return;
+    const wordKey = detailWord.word.toLowerCase();
+    const newMastered = reviewStats?.mastered ? 0 : 1;
+    // Ensure review_schedule entry exists
+    await api.dbRun('INSERT OR IGNORE INTO review_schedule (word) VALUES (?)', [wordKey]);
+    await api.dbRun(
+      'UPDATE review_schedule SET mastered = ?, consecutive_correct = ? WHERE word = ?',
+      [newMastered, newMastered ? (reviewStats?.consecutive_correct || 0) : 0, wordKey]
+    );
+    setReviewStats((prev) => prev ? { ...prev, mastered: newMastered, consecutive_correct: newMastered ? prev.consecutive_correct : 0 } : null);
+  }, [detailWord, reviewStats]);
 
   // Stable callbacks for VocabularyCard to make React.memo effective
   const handleToggle = useCallback((word: string) => {
@@ -208,10 +252,11 @@ export const VocabularyList: React.FC = () => {
           <button
             onClick={closeDetail}
             className="flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-accent transition-colors shrink-0 text-muted-foreground hover:text-foreground"
-            title={reviewDetailWord ? '返回复习' : '返回列表'}
+            title={reviewDetailWord ? '返回复习' : readerDetailWord ? '返回阅读' : '返回列表'}
           >
             <ArrowLeft size={16} />
             {reviewDetailWord && <span className="text-xs">返回复习</span>}
+            {readerDetailWord && !reviewDetailWord && <span className="text-xs">返回阅读</span>}
           </button>
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
@@ -246,6 +291,51 @@ export const VocabularyList: React.FC = () => {
             {/* AI Vocabulary Analysis */}
             <div className="bg-card border border-border rounded-xl p-5">
               <VocabAIAnalysis entry={detailWord} />
+            </div>
+
+            {/* Review Stats / Mastery */}
+            <div className="bg-card border border-border rounded-xl p-5">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-sm font-semibold flex items-center gap-2">
+                  <Award size={15} className={reviewStats?.mastered ? 'text-amber-500' : 'text-muted-foreground'} />
+                  背诵情况
+                </div>
+                <button
+                  onClick={toggleMastery}
+                  className={`text-xs px-3 py-1 rounded-full font-medium transition-colors ${
+                    reviewStats?.mastered
+                      ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-900/50'
+                      : 'bg-secondary text-muted-foreground hover:bg-primary/10 hover:text-primary'
+                  }`}
+                >
+                  {reviewStats?.mastered ? '已掌握 ✓ （点击取消）' : '标记为已掌握'}
+                </button>
+              </div>
+              <div className="grid grid-cols-3 gap-3 text-center">
+                <div className="bg-secondary/40 rounded-lg p-3">
+                  <div className="text-lg font-bold tabular-nums">{reviewStats?.consecutive_correct ?? 0}</div>
+                  <div className="text-[10px] text-muted-foreground mt-0.5">连续记对</div>
+                </div>
+                <div className="bg-secondary/40 rounded-lg p-3">
+                  <div className="text-lg font-bold tabular-nums">{reviewStats?.repetitions ?? 0}</div>
+                  <div className="text-[10px] text-muted-foreground mt-0.5">复习次数</div>
+                </div>
+                <div className="bg-secondary/40 rounded-lg p-3">
+                  <div className="text-xs font-medium tabular-nums flex items-center justify-center gap-1 h-[28px]">
+                    {reviewStats?.last_review_date ? (
+                      <><Clock size={11} className="text-muted-foreground" />{new Date(reviewStats.last_review_date).toLocaleDateString()}</>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </div>
+                  <div className="text-[10px] text-muted-foreground mt-0.5">上次复习</div>
+                </div>
+              </div>
+              {!reviewStats?.mastered && (reviewStats?.consecutive_correct ?? 0) > 0 && (
+                <div className="mt-2 text-[10px] text-muted-foreground text-center">
+                  再连续记对 {5 - (reviewStats?.consecutive_correct ?? 0)} 次将自动标记为已掌握
+                </div>
+              )}
             </div>
 
             {detailWord.meanings.map((meaning, mIdx) => (

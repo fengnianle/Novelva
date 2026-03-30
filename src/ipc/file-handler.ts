@@ -121,6 +121,14 @@ export function registerFileHandlers(): void {
     return { filePath, content: '', fileName };
   });
 
+  ipcMain.handle('file:exists', (_event, filePath: string) => {
+    try {
+      return fs.existsSync(filePath);
+    } catch (_) {
+      return false;
+    }
+  });
+
   ipcMain.handle('file:read-text', async (_event, filePath: string) => {
     try {
       return fs.readFileSync(filePath, 'utf-8');
