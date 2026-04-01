@@ -185,9 +185,28 @@ export const WordPopover: React.FC<WordPopoverProps> = ({
 
   const handleAdd = useCallback(async () => {
     if (!wordData || added) return;
+    const _api = (window as any).electronAPI;
+
+    // Look up the actual translation & language for THIS sentence from sentence_cache,
+    // not from currentAnalysis (which may belong to a different sentence).
+    let sentenceTranslation: string | undefined = undefined;
+    let sentenceLanguage: string | undefined = undefined;
+    try {
+      if (_api) {
+        const cached = await _api.dbQuery(
+          'SELECT translation, language FROM sentence_cache WHERE sentence_text = ? LIMIT 1',
+          [sentence]
+        );
+        if (cached && cached.length > 0) {
+          sentenceTranslation = cached[0].translation || undefined;
+          sentenceLanguage = cached[0].language || undefined;
+        }
+      }
+    } catch (_) { /* ignore */ }
+
     let saveWord = word;
     let savePos = wordData.pos || '';
-    if (currentAnalysis?.language === 'de') {
+    if (sentenceLanguage === 'de') {
       const articleMatch = word.match(/^(der|die|das)\s+/i);
       if (articleMatch) {
         const article = articleMatch[1].toLowerCase();
@@ -205,15 +224,14 @@ export const WordPopover: React.FC<WordPopoverProps> = ({
       saveWord,
       wordData.meaning,
       sentence,
-      currentAnalysis?.translation,
+      sentenceTranslation,
       currentBook?.fileName,
-      currentAnalysis?.language,
+      sentenceLanguage,
       savePos
     );
     setAdded(true);
     // Re-query the id so we can uncollect later
     try {
-      const _api = (window as any).electronAPI;
       if (_api) {
         const rows = await _api.dbQuery(
           'SELECT id FROM vocabulary WHERE LOWER(word) = LOWER(?) AND sentence = ?',
@@ -223,7 +241,7 @@ export const WordPopover: React.FC<WordPopoverProps> = ({
       }
     } catch (_) { /* ignore */ }
     useReaderStore.getState().bumpVocabRefresh();
-  }, [word, wordData, sentence, added, addToVocabulary, currentAnalysis, currentBook]);
+  }, [word, wordData, sentence, added, addToVocabulary, currentBook]);
 
   const handleRemove = useCallback(async () => {
     if (!added || existingId == null) return;
