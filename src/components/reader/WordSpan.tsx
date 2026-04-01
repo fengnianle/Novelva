@@ -6,14 +6,15 @@ interface WordSpanProps {
   word: string;
   sentence: string;
   isParentSelected: boolean;
+  lookupWord?: string;
 }
 
-export const WordSpan: React.FC<WordSpanProps> = ({ word, sentence, isParentSelected }) => {
+export const WordSpan: React.FC<WordSpanProps> = ({ word, sentence, isParentSelected, lookupWord }) => {
   const [showPopover, setShowPopover] = useState(false);
   const wordRef = useRef<HTMLSpanElement>(null);
 
-  // Clean word for lookup (remove punctuation)
-  const cleanWord = word.replace(/[^a-zA-Z'-]/g, '').toLowerCase();
+  // Clean word for lookup (remove punctuation). Use lookupWord if provided (e.g. for grouped phrasal verbs).
+  const cleanWord = lookupWord || word.replace(/[^a-zA-Z'-]/g, '').toLowerCase();
 
   const handleClick = useCallback(
     (e: React.MouseEvent) => {

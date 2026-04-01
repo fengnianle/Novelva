@@ -159,9 +159,19 @@ export async function analyzeSentence(
   try {
     const prompt = buildPrompt(sentencePrompt, currentSentence, prevSentence, nextSentence);
 
-    // Set up stream listeners
-    const removeChunkListener = api.onStreamChunk(streamId, (_chunk: string) => {
-      // Stream is active — the LoadingSkeleton timer shows progress
+    // Set up stream listeners — extract translation early for perceived speed
+    let streamBuffer = '';
+    let translationExtracted = false;
+    const { setStreamingTranslation } = useAiStore.getState();
+    const removeChunkListener = api.onStreamChunk(streamId, (chunk: string) => {
+      if (translationExtracted) return;
+      streamBuffer += chunk;
+      // Try to extract "translation":"..." from partial JSON
+      const match = streamBuffer.match(/"translation"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+      if (match) {
+        translationExtracted = true;
+        setStreamingTranslation(match[1].replace(/\\"/g, '"').replace(/\\n/g, '\n'));
+      }
     });
 
     const streamDonePromise = new Promise<string>((resolve, reject) => {

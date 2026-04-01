@@ -60,7 +60,7 @@ export const SentencePopover: React.FC<SentencePopoverProps> = ({
   nextSentence,
   onClose,
 }) => {
-  const { loading, currentAnalysis, error } = useAiStore();
+  const { loading, currentAnalysis, streamingTranslation, error } = useAiStore();
   const { addToVocabulary, removeFromVocabulary } = useVocabulary();
   const { currentBook } = useReaderStore();
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -151,22 +151,18 @@ export const SentencePopover: React.FC<SentencePopoverProps> = ({
   }, [onClose, anchorRef]);
 
   const handleAddWord = async (word: string, meaning: string, pos?: string) => {
-    // Strip German articles (der/die/das) from word — store base word only
+    // The AI returns the lemma/base form as 'word'. For German nouns with articles,
+    // strip the article from the stored word and preserve it in POS.
     let saveWord = word;
     let savePos = pos || '';
-    if (currentAnalysis?.language === 'de') {
-      const articleMatch = word.match(/^(der|die|das)\s+/i);
-      if (articleMatch) {
-        const article = articleMatch[1].toLowerCase();
-        saveWord = word.replace(/^(der|die|das|ein|eine|einen|einem|einer|eines)\s+/i, '');
-        // Prepend article to POS so gender is preserved (e.g., "der, 名词")
-        if (savePos && !savePos.toLowerCase().includes(article)) {
-          savePos = `${article}, ${savePos}`;
-        } else if (!savePos) {
-          savePos = article;
-        }
-      } else {
-        saveWord = word.replace(/^(ein|eine|einen|einem|einer|eines)\s+/i, '');
+    const articleMatch = saveWord.match(/^(der|die|das)\s+/i);
+    if (articleMatch) {
+      const article = articleMatch[1].toLowerCase();
+      saveWord = saveWord.replace(/^(der|die|das)\s+/i, '');
+      if (savePos && !savePos.toLowerCase().includes(article)) {
+        savePos = `${article}, ${savePos}`;
+      } else if (!savePos) {
+        savePos = article;
       }
     }
     await addToVocabulary(
@@ -229,7 +225,28 @@ export const SentencePopover: React.FC<SentencePopoverProps> = ({
       </div>
 
       <div className="px-4 py-3 max-h-[400px] overflow-y-auto">
-        {loading && <LoadingSkeleton />}
+        {loading && (
+          <>
+            {streamingTranslation ? (
+              <div className="space-y-3 py-2 animate-in fade-in-0 duration-300">
+                <div className="text-sm">{streamingTranslation}</div>
+                <div className="flex items-center gap-2">
+                  <Loader2 size={14} className="animate-spin text-primary shrink-0" />
+                  <span className="text-xs text-muted-foreground">正在解析语法和词汇...</span>
+                </div>
+                <div className="space-y-1.5">
+                  <div className="h-8 bg-secondary/30 rounded animate-pulse w-full" />
+                  <div className="flex gap-1.5">
+                    <div className="h-6 bg-secondary/30 rounded animate-pulse w-20" />
+                    <div className="h-6 bg-secondary/30 rounded animate-pulse w-24" />
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <LoadingSkeleton />
+            )}
+          </>
+        )}
 
         {error && (
           <div className="text-sm text-destructive py-2">{error}</div>
@@ -285,13 +302,6 @@ export const SentencePopover: React.FC<SentencePopoverProps> = ({
                 </div>
               </div>
             )}
-
-            <div>
-              <div className="text-xs font-medium text-muted-foreground mb-1">说明</div>
-              <div className="text-sm text-muted-foreground">
-                {currentAnalysis.explanation}
-              </div>
-            </div>
 
             {currentAnalysis.words.length > 0 && (
               <div>

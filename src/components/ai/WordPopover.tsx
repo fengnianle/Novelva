@@ -119,8 +119,15 @@ export const WordPopover: React.FC<WordPopoverProps> = ({
 单词: "${word}"
 句子: "${sentence}"
 
+要求：
+- word必须是词典原形/词元形式（不是变体），如英语 went→go，德语 ging→gehen
+- 英语词组动词(phrasal verb)请返回完整词组作为word，如 look up, give in
+- 德语可分动词请返回不定式原形作为word，如 fängt...an → anfangen
+- 德语名词请带冠词(der/die/das)
+- surface为句中实际形态
+
 请严格按以下 JSON 格式返回（不要添加任何其他内容，不要使用 markdown 代码块）：
-{"word": "${word}", "meaning": "在此语境下的中文含义", "pos": "词性"}`;
+{"word":"原形","surface":"句中形态","meaning":"在此语境下的中文含义","pos":"词性"}`;
 
         const { baseUrl, model } = getProviderConfig();
         const rawResponse = await api.callAI(prompt, apiKey, undefined, baseUrl, model);
@@ -163,16 +170,22 @@ export const WordPopover: React.FC<WordPopoverProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [onClose]);
 
-  // Check if already in vocabulary
+  // Check if already in vocabulary (by surface form or lemma)
   const [existingId, setExistingId] = useState<number | null>(null);
   useEffect(() => {
     const checkExists = async () => {
       const api = (window as any).electronAPI;
       if (!api) return;
       try {
+        // Check both the clicked word and the AI-returned lemma
+        const wordsToCheck = [word];
+        if (wordData?.word && wordData.word.toLowerCase() !== word.toLowerCase()) {
+          wordsToCheck.push(wordData.word);
+        }
+        const placeholders = wordsToCheck.map(() => 'LOWER(word) = LOWER(?)').join(' OR ');
         const rows = await api.dbQuery(
-          'SELECT id FROM vocabulary WHERE LOWER(word) = LOWER(?) AND sentence = ?',
-          [word, sentence]
+          `SELECT id FROM vocabulary WHERE (${placeholders}) AND sentence = ?`,
+          [...wordsToCheck, sentence]
         );
         if (rows && rows.length > 0) {
           setAdded(true);
@@ -181,7 +194,7 @@ export const WordPopover: React.FC<WordPopoverProps> = ({
       } catch (_) { /* ignore */ }
     };
     checkExists();
-  }, [word, sentence]);
+  }, [word, wordData, sentence]);
 
   const handleAdd = useCallback(async () => {
     if (!wordData || added) return;
@@ -204,20 +217,20 @@ export const WordPopover: React.FC<WordPopoverProps> = ({
       }
     } catch (_) { /* ignore */ }
 
-    let saveWord = word;
+    // Use the AI-returned lemma/base form (wordData.word), not the clicked surface form
+    let saveWord = wordData.word || word;
     let savePos = wordData.pos || '';
-    if (sentenceLanguage === 'de') {
-      const articleMatch = word.match(/^(der|die|das)\s+/i);
+    // For German nouns with articles: strip article from word, preserve in pos
+    if (sentenceLanguage === 'de' || /^(der|die|das)\s+/i.test(saveWord)) {
+      const articleMatch = saveWord.match(/^(der|die|das)\s+/i);
       if (articleMatch) {
         const article = articleMatch[1].toLowerCase();
-        saveWord = word.replace(/^(der|die|das|ein|eine|einen|einem|einer|eines)\s+/i, '');
+        saveWord = saveWord.replace(/^(der|die|das)\s+/i, '');
         if (savePos && !savePos.toLowerCase().includes(article)) {
           savePos = `${article}, ${savePos}`;
         } else if (!savePos) {
           savePos = article;
         }
-      } else {
-        saveWord = word.replace(/^(ein|eine|einen|einem|einer|eines)\s+/i, '');
       }
     }
     await addToVocabulary(
@@ -235,7 +248,7 @@ export const WordPopover: React.FC<WordPopoverProps> = ({
       if (_api) {
         const rows = await _api.dbQuery(
           'SELECT id FROM vocabulary WHERE LOWER(word) = LOWER(?) AND sentence = ?',
-          [word, sentence]
+          [saveWord, sentence]
         );
         if (rows && rows.length > 0) setExistingId(rows[0].id);
       }
@@ -258,8 +271,11 @@ export const WordPopover: React.FC<WordPopoverProps> = ({
       onClick={(e) => e.stopPropagation()}
     >
       <div className="flex items-center justify-between px-3 py-2 border-b border-border">
-        <div>
-          <span className="font-medium text-sm">{word}</span>
+        <div className="min-w-0 flex-1 mr-2">
+          <span className="font-medium text-sm">{wordData?.word && wordData.word.toLowerCase() !== word.toLowerCase() ? wordData.word : word}</span>
+          {wordData?.surface && wordData.word && wordData.word.toLowerCase() !== word.toLowerCase() && (
+            <span className="text-xs text-muted-foreground/60 ml-1">[{word}]</span>
+          )}
           {wordData?.pos && (
             <span className="text-xs text-muted-foreground ml-1.5">{wordData.pos}</span>
           )}
@@ -301,7 +317,7 @@ export const WordPopover: React.FC<WordPopoverProps> = ({
                     已收藏 ✓
                   </button>
                   <button
-                    onClick={() => { onClose(); useReaderStore.getState().openWordDetailFromReader(word); }}
+                    onClick={() => { onClose(); useReaderStore.getState().openWordDetailFromReader(wordData?.word || word); }}
                     className="inline-flex items-center gap-1 text-xs text-primary hover:text-primary/80 transition-colors"
                   >
                     <ExternalLink size={12} />
