@@ -15,7 +15,7 @@ interface ParagraphProps {
 
 export const Paragraph: React.FC<ParagraphProps> = React.memo(({ paragraph, collectedSentences, vocabWords, bookmarkSentenceId, onContextMenu }) => {
   return (
-    <p className="mb-4">
+    <div className="mb-4">
       {paragraph.sentences.map((sentence, idx) => (
         <Sentence
           key={sentence.id}
@@ -28,7 +28,7 @@ export const Paragraph: React.FC<ParagraphProps> = React.memo(({ paragraph, coll
           onContextMenu={onContextMenu}
         />
       ))}
-    </p>
+    </div>
   );
 }, (prev, next) => {
   if (prev.paragraph !== next.paragraph) return false;
