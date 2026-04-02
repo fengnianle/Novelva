@@ -6,6 +6,7 @@ import { analyzeSentence } from '../../hooks/use-ai-analysis';
 import { WordSpan } from './WordSpan';
 import { WordPopover } from '../ai/WordPopover';
 import { SentencePopover } from '../ai/SentencePopover';
+import { buildStemSet, isVocabMatch } from '../../lib/stemmer';
 
 interface SentenceProps {
   sentence: SentenceData;
@@ -146,6 +147,15 @@ const HoverWordWrapper: React.FC<HoverWordWrapperProps> = React.memo(({ word, se
 // Cached at module level to avoid rebuilding per sentence.
 let _cachedVocabSet: Set<string> | null = null;
 let _cachedVocabPattern: string | null = null;
+let _cachedStemSet: Set<string> | null = null;
+let _cachedStemSource: Set<string> | null = null;
+function getCachedStemSet(vocabWords: Set<string>): Set<string> {
+  if (_cachedStemSource !== vocabWords || !_cachedStemSet) {
+    _cachedStemSet = buildStemSet(vocabWords);
+    _cachedStemSource = vocabWords;
+  }
+  return _cachedStemSet;
+}
 function getVocabSplitRegex(vocabWords: Set<string>): RegExp {
   if (_cachedVocabSet !== vocabWords || !_cachedVocabPattern) {
     // Separate multi-word and single-word entries
@@ -176,13 +186,14 @@ function renderTextWithHighlights(text: string, vocabWords?: Set<string>): React
   if (!vocabWords || vocabWords.size === 0) return text;
   const regex = getVocabSplitRegex(vocabWords);
   const parts = text.split(regex);
+  const stemSet = getCachedStemSet(vocabWords);
   let hasVocab = false;
   for (const p of parts) {
-    if (p && vocabWords.has(p.toLowerCase())) { hasVocab = true; break; }
+    if (p && isVocabMatch(p, vocabWords, stemSet)) { hasVocab = true; break; }
   }
   if (!hasVocab) return text;
   return parts.map((part, i) => {
-    if (part && vocabWords.has(part.toLowerCase())) {
+    if (part && isVocabMatch(part, vocabWords, stemSet)) {
       return <span key={i} className="font-semibold text-primary/70 dark:text-primary/60">{part}</span>;
     }
     return <React.Fragment key={i}>{part}</React.Fragment>;
@@ -200,7 +211,7 @@ function renderTextWithHoverWords(
   const tokens = buildGroupedTokens(text, cachedAnalysis);
   return tokens.map((token, i) => {
     if (!token.isWord) return <React.Fragment key={i}>{token.display}</React.Fragment>;
-    const isVocab = vocabWords ? vocabWords.has(token.lookup.toLowerCase()) : false;
+    const isVocab = vocabWords ? isVocabMatch(token.lookup, vocabWords, getCachedStemSet(vocabWords)) : false;
     return (
       <HoverWordWrapper
         key={i}

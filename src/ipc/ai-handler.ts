@@ -158,6 +158,7 @@ export function registerAiHandlers(): void {
               temperature: 0.1,
               max_tokens: 800,
               stream: true,
+              stream_options: { include_usage: true },
             }),
             signal: controller.signal,
           }
@@ -177,6 +178,7 @@ export function registerAiHandlers(): void {
         const decoder = new TextDecoder();
         let buffer = '';
         let fullContent = '';
+        let streamUsage: any = null;
 
         while (true) {
           const { done, value } = await reader.read();
@@ -199,12 +201,23 @@ export function registerAiHandlers(): void {
                 fullContent += delta;
                 win.webContents.send(`ai:stream-chunk:${sid}`, delta);
               }
+              // Capture usage from the final chunk (OpenAI/DeepSeek include it when stream_options.include_usage is set)
+              if (parsed.usage) {
+                streamUsage = parsed.usage;
+              }
             } catch (_) { /* skip malformed chunks */ }
           }
         }
 
-        // Track usage (estimate for streaming — exact usage not always provided)
-        trackTokenUsage({ prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, callCount: 0 });
+        // Track usage from stream, or estimate if provider didn't return usage
+        if (streamUsage) {
+          trackTokenUsage(streamUsage);
+        } else {
+          // Rough estimate: ~4 chars per token for English
+          const estPrompt = Math.ceil((sysContent.length + prompt.length) / 4);
+          const estCompletion = Math.ceil(fullContent.length / 4);
+          trackTokenUsage({ prompt_tokens: estPrompt, completion_tokens: estCompletion, total_tokens: estPrompt + estCompletion });
+        }
         activeStreams.delete(sid);
         // Signal completion
         win.webContents.send(`ai:stream-done:${sid}`, fullContent);
