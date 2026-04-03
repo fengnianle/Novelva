@@ -371,14 +371,16 @@ function collectMultiWordPatterns(analysis: SentenceAnalysis): MultiWordPattern[
 }
 
 function buildGroupedTokens(text: string, analysis?: SentenceAnalysis | null): Array<{ display: string; lookup: string; isWord: boolean }> {
-  const tokens = text.split(/(\s+)/);
+  // Split on whitespace AND em-dash/en-dash so that "word1—word2" becomes
+  // ["word1", "—", "word2"] instead of one merged token
+  const tokens = text.split(/(\s+|[\u2014\u2013])/);
   const patterns = analysis ? collectMultiWordPatterns(analysis) : [];
 
   if (patterns.length === 0) {
     return tokens.map(t => ({
       display: t,
       lookup: t.replace(/[^a-zA-Z\u00C0-\u024F\u0400-\u04FF'-]/g, '').toLowerCase(),
-      isWord: !/^\s*$/.test(t),
+      isWord: /[a-zA-Z\u00C0-\u024F\u0400-\u04FF]/.test(t),
     }));
   }
 
@@ -386,7 +388,7 @@ function buildGroupedTokens(text: string, analysis?: SentenceAnalysis | null): A
   const wordTokens: string[] = [];
   const wordTokenIndices: number[] = [];
   tokens.forEach((t, i) => {
-    if (!/^\s+$/.test(t)) {
+    if (/[a-zA-Z\u00C0-\u024F\u0400-\u04FF]/.test(t)) {
       wordTokens.push(t);
       wordTokenIndices.push(i);
     }
@@ -449,9 +451,9 @@ function buildGroupedTokens(text: string, analysis?: SentenceAnalysis | null): A
         const gap = indices[k + 1] - indices[k];
         // Adjacent means next index or next index +1 (with one whitespace token between)
         if (gap > 2) { allAdjacent = false; break; }
-        // Check tokens between are only whitespace
+        // Check tokens between are only whitespace or punctuation (not words)
         for (let g = indices[k] + 1; g < indices[k + 1]; g++) {
-          if (!/^\s+$/.test(tokens[g])) { allAdjacent = false; break; }
+          if (/[a-zA-Z\u00C0-\u024F\u0400-\u04FF]/.test(tokens[g])) { allAdjacent = false; break; }
         }
         if (!allAdjacent) break;
       }
@@ -476,7 +478,7 @@ function buildGroupedTokens(text: string, analysis?: SentenceAnalysis | null): A
         const gap = indices[k + 1] - indices[k];
         if (gap > 2) { allAdjacent = false; break; }
         for (let g = indices[k] + 1; g < indices[k + 1]; g++) {
-          if (!/^\s+$/.test(tokens[g])) { allAdjacent = false; break; }
+          if (/[a-zA-Z\u00C0-\u024F\u0400-\u04FF]/.test(tokens[g])) { allAdjacent = false; break; }
         }
         if (!allAdjacent) break;
       }
@@ -489,7 +491,7 @@ function buildGroupedTokens(text: string, analysis?: SentenceAnalysis | null): A
       result.push({
         display: tokens[i],
         lookup: tokens[i].replace(/[^a-zA-Z\u00C0-\u024F\u0400-\u04FF'-]/g, '').toLowerCase(),
-        isWord: !/^\s+$/.test(tokens[i]),
+        isWord: /[a-zA-Z\u00C0-\u024F\u0400-\u04FF]/.test(tokens[i]),
       });
     }
   }

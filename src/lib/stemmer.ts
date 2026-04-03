@@ -165,129 +165,146 @@ const IRREGULAR_MAP: Record<string, string> = {
 };
 
 /**
- * Simple suffix-based stem for regular English words.
- * Strips common endings to produce a rough root form.
+ * Generate all plausible stems for an English word.
+ * Returns multiple candidates to avoid false negatives from
+ * ambiguous suffix stripping (e.g. "making" → ["mak", "make"]).
  */
-function stripSuffix(word: string): string {
+function allStems(word: string): string[] {
   const len = word.length;
-  if (len <= 3) return word;
+  if (len <= 3) return [word];
+  const results: string[] = [word];
 
-  // -ying → -y  (e.g. studying → study) — but not "lying" which is irregular
-  if (word.endsWith('ying') && len > 5) return word.slice(0, -3);
-
-  // -ied → -y  (e.g. tried → try, carried → carry)
-  if (word.endsWith('ied') && len > 4) return word.slice(0, -3) + 'y';
-
-  // -ies → -y  (e.g. tries → try, carries → carry) but not 2-letter root
-  if (word.endsWith('ies') && len > 4) return word.slice(0, -3) + 'y';
-
-  // -ing: doubled consonant (running → run, sitting → sit)
-  if (word.endsWith('ing') && len > 5) {
-    const base = word.slice(0, -3);
-    // Doubled consonant before -ing
+  const addBase = (base: string) => {
+    if (base && !results.includes(base)) results.push(base);
+    // Also try with/without doubled consonant reduction and silent 'e'
     if (base.length >= 2 && base[base.length - 1] === base[base.length - 2]) {
-      return base.slice(0, -1);
+      const reduced = base.slice(0, -1);
+      if (reduced && !results.includes(reduced)) results.push(reduced);
     }
-    // e.g. making → mak → make, writing → writ → write
-    // If removing -ing leaves a consonant, try adding 'e'
     if (/[bcdfghjklmnpqrstvwxyz]$/.test(base)) {
-      return base + 'e';
+      const withE = base + 'e';
+      if (!results.includes(withE)) results.push(withE);
     }
-    return base;
+  };
+
+  // -ying → -y  (studying → study)
+  if (word.endsWith('ying') && len > 5) {
+    addBase(word.slice(0, -3));
+    return results;
   }
-  // Short -ing (e.g. being → be, but that's irregular)
+
+  // -ied → -y  (tried → try)
+  if (word.endsWith('ied') && len > 4) {
+    const base = word.slice(0, -3) + 'y';
+    if (!results.includes(base)) results.push(base);
+    return results;
+  }
+
+  // -ies → -y  (tries → try)
+  if (word.endsWith('ies') && len > 4) {
+    const base = word.slice(0, -3) + 'y';
+    if (!results.includes(base)) results.push(base);
+    return results;
+  }
+
+  // -ing
   if (word.endsWith('ing') && len > 4) {
-    return word.slice(0, -3);
+    addBase(word.slice(0, -3));
+    return results;
   }
 
-  // -ed: doubled consonant (stopped → stop)
-  if (word.endsWith('ed') && len > 4) {
-    const base = word.slice(0, -2);
-    if (base.length >= 2 && base[base.length - 1] === base[base.length - 2]) {
-      return base.slice(0, -1);
-    }
-    // e.g. liked → lik → like
-    if (/[bcdfghjklmnpqrstvwxyz]$/.test(base) && !/[bcdfghjklmnpqrstvwxyz]{2}$/.test(base)) {
-      return base + 'e';
-    }
-    return base;
-  }
+  // -ed
   if (word.endsWith('ed') && len > 3) {
-    return word.slice(0, -2);
+    addBase(word.slice(0, -2));
+    // also try removing just -d (e.g. "used" → "use")
+    if (word.endsWith('ed') && len > 4) {
+      const minusD = word.slice(0, -1);
+      if (!results.includes(minusD)) results.push(minusD);
+    }
+    return results;
   }
 
-  // -er (comparative or agent: bigger → big, runner → run, player → play)
+  // -er
   if (word.endsWith('er') && len > 4) {
-    const base = word.slice(0, -2);
-    if (base.length >= 2 && base[base.length - 1] === base[base.length - 2]) {
-      return base.slice(0, -1);
-    }
-    return base;
+    addBase(word.slice(0, -2));
+    // also try removing just -r (e.g. "nicer" → "nice")
+    const minusR = word.slice(0, -1);
+    if (!results.includes(minusR)) results.push(minusR);
+    return results;
   }
 
-  // -est (superlative: biggest → big)
+  // -est
   if (word.endsWith('est') && len > 5) {
-    const base = word.slice(0, -3);
-    if (base.length >= 2 && base[base.length - 1] === base[base.length - 2]) {
-      return base.slice(0, -1);
-    }
-    return base;
+    addBase(word.slice(0, -3));
+    return results;
   }
 
-  // -ness (happiness → happi, sadness → sad)
-  if (word.endsWith('ness') && len > 5) return word.slice(0, -4);
+  // -ness
+  if (word.endsWith('ness') && len > 5) {
+    addBase(word.slice(0, -4));
+    return results;
+  }
 
-  // -ly (quickly → quick, happily → happi)
-  if (word.endsWith('ly') && len > 4) return word.slice(0, -2);
+  // -ly
+  if (word.endsWith('ly') && len > 4) {
+    addBase(word.slice(0, -2));
+    return results;
+  }
 
-  // -es (watches → watch, boxes → box, goes → go)
-  if (word.endsWith('shes') && len > 5) return word.slice(0, -2);
-  if (word.endsWith('ches') && len > 5) return word.slice(0, -2);
-  if (word.endsWith('xes') && len > 4) return word.slice(0, -2);
-  if (word.endsWith('sses') && len > 5) return word.slice(0, -2);
-  if (word.endsWith('zes') && len > 4) return word.slice(0, -2);
+  // -es (watches → watch, boxes → box)
+  if (word.endsWith('shes') && len > 5) { addBase(word.slice(0, -2)); return results; }
+  if (word.endsWith('ches') && len > 5) { addBase(word.slice(0, -2)); return results; }
+  if (word.endsWith('xes') && len > 4) { addBase(word.slice(0, -2)); return results; }
+  if (word.endsWith('sses') && len > 5) { addBase(word.slice(0, -2)); return results; }
+  if (word.endsWith('zes') && len > 4) { addBase(word.slice(0, -2)); return results; }
 
-  // -s (cats → cat, plays → play)
-  if (word.endsWith('s') && !word.endsWith('ss') && len > 3) return word.slice(0, -1);
+  // -s (cats → cat)
+  if (word.endsWith('s') && !word.endsWith('ss') && len > 3) {
+    const base = word.slice(0, -1);
+    if (!results.includes(base)) results.push(base);
+    return results;
+  }
 
-  return word;
+  return results;
 }
 
 /**
- * Reduce an English word to a stem for comparison.
- * First checks irregular forms, then applies suffix stripping.
- * Returns lowercase.
+ * Get all plausible stems for a word (irregular + suffix-based).
+ * Returns lowercase array.
  */
-export function stem(word: string): string {
+export function stems(word: string): string[] {
   const lower = word.toLowerCase().trim();
-  if (!lower) return lower;
+  if (!lower) return [lower];
 
   // Check irregular map first
   const irregular = IRREGULAR_MAP[lower];
-  if (irregular) return irregular;
+  if (irregular) return [lower, irregular];
 
-  return stripSuffix(lower);
+  return allStems(lower);
 }
 
 /**
  * Build a Set of stems from a Set of vocab words.
- * Maps each vocab word to its stem, so we can match text variants.
+ * For each vocab word, stores the word itself plus all its stems.
  */
 export function buildStemSet(vocabWords: Set<string>): Set<string> {
-  const stems = new Set<string>();
+  const set = new Set<string>();
   for (const w of vocabWords) {
-    stems.add(w); // keep original
-    stems.add(stem(w)); // add stem
+    for (const s of stems(w)) set.add(s);
   }
-  return stems;
+  return set;
 }
 
 /**
  * Check if a word (possibly inflected) matches any collected vocab word.
- * Compares both the exact lowercase form and the stemmed form.
+ * Compares the word's exact form and all its stems against the vocab stem set.
  */
 export function isVocabMatch(word: string, vocabWords: Set<string>, vocabStems: Set<string>): boolean {
   const lower = word.toLowerCase();
   if (vocabWords.has(lower)) return true;
-  return vocabStems.has(stem(lower));
+  // Check all stems of this word against the vocab stem set
+  for (const s of stems(lower)) {
+    if (vocabStems.has(s)) return true;
+  }
+  return false;
 }
