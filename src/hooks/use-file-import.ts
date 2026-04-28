@@ -72,10 +72,11 @@ export function useFileImport() {
 
       setCurrentBook({ filePath, fileName, content, paragraphs });
       addRecentBook(filePath, fileName);
+      setFileLoading(false);
     } catch (err) {
       console.error('File parsing error:', err);
-    } finally {
-      setFileLoading(false);
+      setFileLoading(true, `文件解析失败: ${(err as Error).message || '未知错误'}`);
+      setTimeout(() => setFileLoading(false), 3000);
     }
   }, [setCurrentBook, addRecentBook, setFileLoading]);
 
@@ -110,10 +111,11 @@ export function useFileImport() {
 
       setCurrentBook({ filePath, fileName, content, paragraphs });
       addRecentBook(filePath, fileName);
+      setFileLoading(false);
     } catch (err) {
       console.error('File open error:', err);
-    } finally {
-      setFileLoading(false);
+      setFileLoading(true, `文件打开失败: ${(err as Error).message || '未知错误'}`);
+      setTimeout(() => setFileLoading(false), 3000);
     }
   }, [setCurrentBook, addRecentBook, setFileLoading]);
 

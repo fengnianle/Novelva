@@ -42,8 +42,21 @@ function parseEpub(filePath: string): string {
   const AdmZipClass = getAdmZip();
   const zip = new AdmZipClass(filePath);
 
+  // Build a lookup map for zip entries (case-insensitive fallback)
+  const entries = zip.getEntries();
+  const entryMap = new Map<string, any>();
+  for (const e of entries) {
+    const name = e.entryName.replace(/\\/g, '/');
+    entryMap.set(name, e);
+    entryMap.set(name.toLowerCase(), e);
+  }
+  const findEntry = (p: string) => {
+    const normalized = p.replace(/\\/g, '/');
+    return entryMap.get(normalized) || entryMap.get(normalized.toLowerCase()) || null;
+  };
+
   // Read container.xml to find the OPF file
-  const containerEntry = zip.getEntry('META-INF/container.xml');
+  const containerEntry = findEntry('META-INF/container.xml');
   if (!containerEntry) throw new Error('Invalid EPUB: missing container.xml');
 
   const containerXml = containerEntry.getData().toString('utf-8');
@@ -52,20 +65,31 @@ function parseEpub(filePath: string): string {
 
   const opfPath = opfMatch[1];
   const opfDir = path.dirname(opfPath).replace(/\\/g, '/');
-  const opfEntry = zip.getEntry(opfPath);
+  const opfEntry = findEntry(opfPath);
   if (!opfEntry) throw new Error(`Invalid EPUB: missing OPF file at ${opfPath}`);
 
   const opfXml = opfEntry.getData().toString('utf-8');
 
   // Extract spine item IDs in order
-  const spineMatches = [...opfXml.matchAll(/<itemref\s+idref="([^"]+)"/g)];
+  const spineMatches = [...opfXml.matchAll(/<itemref\s+[^>]*idref="([^"]+)"[^>]*/g)];
   const spineIds = spineMatches.map((m) => m[1]);
 
   // Build manifest map: id -> href
-  const manifestMatches = [...opfXml.matchAll(/<item\s+[^>]*id="([^"]+)"[^>]*href="([^"]+)"[^>]*/g)];
+  // Handle both <item id="x" href="y"> and <item href="y" id="x"> attribute orders
   const manifest: Record<string, string> = {};
-  for (const m of manifestMatches) {
-    manifest[m[1]] = m[2];
+  const itemMatches = [...opfXml.matchAll(/<item\s+([^>]+)\/?>/g)];
+  for (const m of itemMatches) {
+    const attrs = m[1];
+    const idMatch = attrs.match(/\bid="([^"]+)"/);
+    const hrefMatch = attrs.match(/\bhref="([^"]+)"/);
+    if (idMatch && hrefMatch) {
+      // Decode URL-encoded paths (e.g. %20 -> space)
+      try {
+        manifest[idMatch[1]] = decodeURIComponent(hrefMatch[1]);
+      } catch {
+        manifest[idMatch[1]] = hrefMatch[1];
+      }
+    }
   }
 
   // Read each spine item in order
@@ -74,8 +98,15 @@ function parseEpub(filePath: string): string {
     const href = manifest[id];
     if (!href) continue;
 
-    const entryPath = opfDir ? `${opfDir}/${href}` : href;
-    const entry = zip.getEntry(entryPath.replace(/\\/g, '/'));
+    // Resolve path relative to OPF directory
+    let entryPath: string;
+    if (opfDir && opfDir !== '.') {
+      entryPath = `${opfDir}/${href}`;
+    } else {
+      entryPath = href;
+    }
+
+    const entry = findEntry(entryPath);
     if (!entry) continue;
 
     const html = entry.getData().toString('utf-8');
@@ -83,6 +114,10 @@ function parseEpub(filePath: string): string {
     if (text.trim()) {
       textParts.push(text.trim());
     }
+  }
+
+  if (textParts.length === 0) {
+    throw new Error('EPUB 解析完成但未提取到任何文本内容');
   }
 
   return textParts.join('\n\n');
